@@ -73,6 +73,26 @@ async def crawl_url(url: str) -> Dict[str, Any]:
     }
 
 
+async def crawl_text(url: str) -> Dict[str, Any]:
+    """
+    Fetch a page's title and text only. Unlike crawl_url, this makes no LLM call,
+    for callers that only need the content (Stage 1 evidence extraction).
+    Returns {"error": ...} on failure.
+    """
+    try:
+        html = await run_in_threadpool(_fetch_html, url)
+    except requests.exceptions.HTTPError as e:
+        # Response is falsy for 4xx/5xx, so compare to None rather than truthiness
+        status_code = e.response.status_code if e.response is not None else "unknown"
+        return {"error": f"Failed to crawl: HTTP {status_code}"}
+    except Exception as e:
+        return {"error": f"Failed to crawl: {type(e).__name__} - {str(e)[:200]}"}
+
+    soup = BeautifulSoup(html, "html.parser")
+    _strip_unused_tags(soup)
+    return {"title": _safe_text(soup.title), "h1": _first_heading_text(soup), "full_content": _extract_text(soup)}
+
+
 def describe_crawler() -> str:
     """
     Returns a human-readable description of how this crawler appears to websites.

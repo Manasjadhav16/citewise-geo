@@ -186,6 +186,56 @@ async def start_job_endpoint(payload: StartJobRequest):
 
 
 # ==========================================
+# Stage 1: Real-World Observation
+# ==========================================
+
+
+class Stage1StartRequest(BaseModel):
+    observation_id: str
+    url: HttpUrl
+    queries: Optional[List[str]] = None  # generated from the page when omitted
+    runs_per_query: Optional[int] = None  # overrides STAGE1_RUNS_PER_QUERY
+    query_count: Optional[int] = None  # overrides STAGE1_QUERY_COUNT
+
+
+@app.post("/stage1/start")
+async def stage1_start_endpoint(payload: Stage1StartRequest):
+    """
+    Start a Stage 1 observation job in the background. The default fetcher is an
+    approximate proxy for Google AI Overview citations, not real AI Overview data.
+    """
+    import asyncio
+
+    from .observation.config import Stage1Config
+    from .observation.stage1_job import run_stage1_job
+
+    from fastapi import HTTPException
+
+    overrides = {"runs_per_query": payload.runs_per_query, "query_count": payload.query_count}
+    try:
+        Stage1Config.from_env(overrides)  # reject invalid config before starting
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    asyncio.create_task(
+        run_stage1_job(payload.observation_id, str(payload.url), payload.queries, overrides)
+    )
+    return {"message": "Stage 1 observation started", "observation_id": payload.observation_id}
+
+
+class CompareRequest(BaseModel):
+    before: Dict[str, Optional[float]]
+    after: Dict[str, Optional[float]]
+
+
+@app.post("/compare")
+async def compare_endpoint(payload: CompareRequest):
+    """Before/after deltas for two runs' stored metrics (GEO/AEO improvement)."""
+    from .geo_metrics import compare_run_metrics
+
+    return compare_run_metrics(payload.before, payload.after)
+
+
+# ==========================================
 # Test LLM Endpoint
 # ==========================================
 

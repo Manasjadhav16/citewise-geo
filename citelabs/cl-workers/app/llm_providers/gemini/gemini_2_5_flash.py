@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 
 from ...constants import MODEL_GEMINI_2_5_FLASH
-from ..base import BaseLLMProvider
+from ..base import BaseLLMProvider, GroundedResponse, GroundingChunk, order_cited_chunks
 from ..rate_limiter import get_rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,61 @@ class Gemini25FlashProvider(BaseLLMProvider):
         except Exception as exc:
             logger.error(f"Gemini API error ({self.model_name}): {exc}")
             raise
+
+    async def grounded_generate(self, prompt: str, model: Optional[str] = None) -> GroundedResponse:
+        """
+        Answer with Google Search grounding enabled.
+
+        Unlike chat(), this never rotates to another model in the fallback pool on a
+        quota error: repeated observations must all come from the same model, or the
+        run-to-run variation being measured would mix in model differences. It
+        retries the same model with backoff instead.
+        """
+        model = model or os.getenv("STAGE1_GROUNDING_MODEL", "gemini-2.5-flash")
+        max_retries = int(os.getenv("STAGE1_GROUNDING_MAX_RETRIES", "3"))
+        config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+
+        for attempt in range(max_retries + 1):
+            await self.rate_limiter.wait_for_slot(model)
+            try:
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=model,
+                    contents=prompt,
+                    config=config,
+                )
+                break
+            except Exception as call_err:
+                err_str = str(call_err)
+                retryable = any(s in err_str for s in ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED"))
+                if retryable and attempt < max_retries:
+                    delay = 5.0 * (2 ** attempt)
+                    logger.warning(
+                        f"Grounded call on {model} hit {err_str[:60]}; retrying in {delay:.0f}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
+        candidate = response.candidates[0] if response.candidates else None
+        metadata = candidate.grounding_metadata if candidate else None
+        # Keep every chunk, even ones without a web URI, so support indices stay aligned
+        chunks = [
+            GroundingChunk(uri=(c.web.uri or "") if c.web else "", title=c.web.title if c.web else None)
+            for c in (metadata.grounding_chunks or [] if metadata else [])
+        ]
+        spans = [
+            (s.segment.start_index if s.segment else None, s.grounding_chunk_indices or [])
+            for s in (metadata.grounding_supports or [] if metadata else [])
+        ]
+        return GroundedResponse(
+            text=response.text or "",
+            model=model,
+            chunks=chunks,
+            cited_chunk_order=[i for i in order_cited_chunks(spans) if i < len(chunks)],
+            search_queries=list(metadata.web_search_queries or []) if metadata else [],
+        )
 
     def get_provider_name(self) -> str:
         return f"Gemini ({self.model_name})"

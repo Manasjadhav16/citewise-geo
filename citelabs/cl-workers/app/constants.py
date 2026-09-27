@@ -33,6 +33,12 @@ MODEL_ROLES = {
     "QUESTION_GENERATION": MODEL_GEMINI_2_5_FLASH,
     "COMPETITOR_REASONING": MODEL_GEMINI_2_5_FLASH,
     "RAG_ANSWERING": MODEL_GEMINI_2_5_FLASH,
+
+    # Stage 1 (real-world observation). GROUNDED_OBSERVATION picks the provider;
+    # the grounded model itself is STAGE1_GROUNDING_MODEL (see grounded_generate).
+    "GROUNDED_OBSERVATION": MODEL_GEMINI_2_5_FLASH,
+    "SOURCE_CLASSIFICATION": MODEL_GEMINI_2_5_FLASH,
+    "EVIDENCE_EXTRACTION": MODEL_GEMINI_2_5_FLASH,
 }
 
 # Legacy MODEL_MAP for backward compatibility

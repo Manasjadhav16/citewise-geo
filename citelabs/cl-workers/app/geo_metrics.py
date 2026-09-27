@@ -105,6 +105,26 @@ def normalize_domain(url_or_domain: str) -> str:
     return host
 
 
+_TRACKING_PARAM = re.compile(r"^(utm_[a-z]+|gclid|fbclid|srsltid|ref)$", re.IGNORECASE)
+
+
+def canonical_url(url: str) -> str:
+    """
+    Identity for a source page: https, normalized host, no fragment (drops
+    "#:~:text=" highlights), no tracking parameters, no trailing slash.
+    Two citations of the same page map to the same string.
+    """
+    domain = normalize_domain(url)
+    if not domain:
+        return ""
+    parsed = urlparse(url if "://" in url else "//" + url)
+    query = "&".join(
+        part for part in parsed.query.split("&") if part and not _TRACKING_PARAM.match(part.split("=", 1)[0])
+    )
+    path = parsed.path.rstrip("/")
+    return f"https://{domain}{path}" + (f"?{query}" if query else "")
+
+
 def _domain_matches(domain: str, candidates: Iterable[str]) -> bool:
     """True if domain equals a candidate or is a subdomain of one."""
     for candidate in candidates:
