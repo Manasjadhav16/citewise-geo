@@ -58,6 +58,7 @@ Traditional SEO optimizes for 10 blue links; **AEO & GEO** optimize for inclusio
 - **Vector Search & Semantic Retrieval**: Embeds and indexes content using Pinecone / FAISS vector stores and sentence transformers (`all-MiniLM-L6-v2`).
 - **RAG Simulation Engine**: Simulates generative search answer engines under strict citation criteria.
 - **Resilient Multi-Model Failover**: Intelligent rate-limiting and automatic model pool rotation across Google Gemini models (`gemini-3.7-flash`, `gemini-3.8-flash`, `gemini-3.5-flash-lite`) to avoid free-tier quota stalls.
+- **Two-Stage GEO Validation**: Grounds the competitor source pool in repeated real-world observations (Gemini with Google Search grounding, an approximate proxy for AI Overview citations) and measures before/after GEO improvement on a fixed question set and source pool. See [Two-Stage GEO Evaluation](#-two-stage-geo-evaluation).
 - **Interactive Analytics Dashboard**: Real-time polling progress bar, citation distributions, chunk analysis, and GEO/AEO scoring breakdown.
 
 ---
@@ -188,6 +189,134 @@ npm run dev
 - **GEO Score (Generative Engine Optimization)**: Measures aggregate brand visibility, entity mentions, and contextual relevance across generative search responses.
 - **Citation Rate**: Percentage of simulated queries where the target domain is explicitly credited as a primary reference.
 - **Competitor Dominance**: Share of citations captured by direct competitors in the same niche.
+
+---
+
+## 🧭 Two-Stage GEO Evaluation
+
+The 7-step pipeline builds its competitor knowledge base from LLM reasoning and SERP discovery alone. Nothing ties that knowledge base to what AI search answers actually cite, so there is no real-world check that an optimization closed a gap a search engine itself recognizes. The two-stage system adds that grounding:
+
+```mermaid
+flowchart LR
+    W[Current website] --> S1[Stage 1: Real-world observation<br/>repeated search-grounded answers]
+    S1 --> B[Stage 2: Controlled GEO score BEFORE<br/>source pool seeded from Stage 1]
+    B --> O[Website optimization<br/>human step]
+    O --> A[Stage 2: Controlled GEO score AFTER<br/>same questions and source pool]
+    A --> C[Comparison<br/>GEO Improvement = after − before]
+    O -.-> R[Stage 1 again, optional and delayed<br/>did real-world citations change?]
+    R -.-> C
+```
+
+Stage 1 is a validation layer, not a blocker: the controlled score can always be computed without it (as an unseeded run), and Stage 1 results are used for seeding and for comparison.
+
+> [!IMPORTANT]
+> **Stage 1 is an approximate proxy, not Google AI Overview data.** It records Gemini's own search-and-cite behaviour with Google Search grounding. That uses the same underlying Google Search index that AI Overviews draw from, but it is not AI Overview output, and there is no official public AI Overview API. Treat Stage 1 results as an indication of which sources AI search answers tend to cite, never as real AI Overview citations. The UI shows this disclaimer next to every Stage 1 result, and the fetcher is pluggable (`ObservationFetcher` in `cl-workers/app/observation/fetchers.py`) so a better data source can replace it.
+
+### Stage 1: Real-World Observation
+
+Code: `cl-workers/app/observation/`
+
+1. **Queries**: supplied by the caller, or a balanced selection (intent / experience / transaction) from the existing question generator, conditioned on the page's intent, category and domain summary.
+2. **Repeated observation**: each query is asked N times with Google Search grounding. Grounding source links are redirects; each is resolved to the real URL with one `HEAD` request. Search utility results (e.g. "current time") are kept in the raw data but flagged as not being web sources.
+3. **Union source pool**: per query, `Sq = S1 ∪ S2 ∪ … ∪ SN` over successful runs. Nothing is averaged or dropped; each source keeps its stability (share of runs that cited it), and every run's raw ordered citation list is stored.
+4. **Categorisation**: every source domain gets one of `target_company, direct_competitor, indirect_competitor, government, reference, media, community, industry_organization, academic, other`. The target's own domain is matched deterministically; otherwise an LLM classifier decides, with domain heuristics (`.gov`, `.edu`, `.ac.in`, Wikipedia, Reddit, …) as the fallback and a stored cross-check. Categories roll up into **direct business competitors** (sell a competing product) and **AI visibility competitors** (everyone else occupying citation space).
+5. **Evidence-preserving compression**: for each (query, source) pair, the model extracts the evidence that could influence the answer or citation decision for that query (facts, statistics, definitions, entities, product details, claims, specs, comparisons, expert statements, quoted excerpts), not a generic summary. Per-source budget: `min(1000, 20000 / sources)`, never below a 200-token floor.
+
+A single failed observation, crawl or compression is recorded and skipped; it never fails the run.
+
+### Stage 2: Controlled Generative Environment
+
+The existing pipeline, with its source pool grounded in Stage 1:
+
+- **Seeded "before" run** (`observation_id`): questions are Stage 1's queries, so real-world and controlled results can be compared per query. The source pool is Stage 1's union pool (one page per domain, the most stable; the target's own domain excluded because the sandbox page is always crawled) merged with the run's own SERP/LLM discovery, deduplicated by domain with Stage 1's labels winning. Capped at `STAGE2_MAX_SOURCES`, which trims discovered sources first.
+- **"After" run** (`run_tag: "after"`, `baseline_run_id`): reuses the baseline's exact questions and source pool and skips discovery, re-crawling only the pages themselves. The score change then reflects the website, not setup variance.
+- **Unseeded run**: unchanged behaviour (same pages crawled), with category labels added.
+- Every RAG answer is tagged with the sandbox's citation position and the category of each cited and retrieved source.
+- The GEO, AEO and Simulation Reality formulas are unchanged; the new metrics below are reported alongside them.
+
+### Two-Stage Metrics
+
+Implemented as small pure functions in `cl-workers/app/geo_metrics.py` (unit-tested). Rates are percentages.
+
+| Metric | Definition |
+| :--- | :--- |
+| **Mention Rate** (AI visibility) | Responses that name the brand ÷ total responses |
+| **Strict Citation Rate** | Responses that cite the target as a source ÷ total responses. The existing *Citation Rate* in the GEO/AEO formulas counts mentions **or** citations and is kept as is |
+| **Mean / Median Citation Position** | The target's 1-based rank among the distinct domains an answer cites, over answers that cite it (lower is better) |
+| **Source Stability** | Per source: runs that cited it ÷ N (Stage 1) |
+| **Source-Set Diversity** | `\|S1 ∪ … ∪ SN\|` per query (Stage 1) |
+| **Source-Set Stability** | Mean pairwise Jaccard `\|Si ∩ Sj\| / \|Si ∪ Sj\|` across a query's runs; 1 means identical sources every run (Stage 1) |
+| **AI Visibility Competition** | Share of citations by category and by competitor group |
+| **GEO / AEO Improvement** | `Score(after) − Score(before)`, with deltas on every metric above |
+
+### Before/After Workflow
+
+In the UI: start a real-world observation on the home page → **Run controlled GEO score (before)** on the observation page → change the website → **Re-measure after website changes** on the run page → **Compare with baseline**.
+
+Via the API:
+
+```bash
+# 1. Stage 1 (small config for testing; omit the numbers to use the server defaults)
+curl -X POST localhost:4000/api/observation/run -H 'content-type: application/json' \
+  -d '{"url": "https://example.com/page", "runs_per_query": 3, "query_count": 3}'
+# poll GET /api/observation/<observation_id> until "status": "completed"
+
+# 2. Controlled score before the change, seeded from Stage 1
+curl -X POST localhost:4000/api/sandbox/run -H 'content-type: application/json' \
+  -d '{"url": "https://example.com/page", "observation_id": "<observation_id>", "run_tag": "before"}'
+
+# 3. After changing the website: same questions and source pool
+curl -X POST localhost:4000/api/sandbox/run -H 'content-type: application/json' \
+  -d '{"url": "https://example.com/page", "run_tag": "after", "baseline_run_id": "<before run_id>"}'
+
+# 4. Compare (add &before_observation=…&after_observation=… for real-world deltas
+#    once a new Stage 1 observation has been made after the change is indexed)
+curl 'localhost:4000/api/sandbox/compare?before=<before run_id>&after=<after run_id>'
+```
+
+Add `"dry_run": true` to a `/api/sandbox/run` request to validate it and see the seed without starting a run.
+
+| Endpoint | Purpose |
+| :--- | :--- |
+| `POST /api/observation/run` | Start Stage 1 (`url`, optional `queries`, `runs_per_query`, `query_count`) |
+| `GET /api/observation/:id` | Observation with per-query pools, categories, evidence and metrics (`?raw=true` adds answer texts and raw citation lists) |
+| `GET /api/observation?url=` | Recent observations |
+| `POST /api/sandbox/run` | Stage 2 run; optional `observation_id`, `run_tag`, `baseline_run_id`, `dry_run` |
+| `GET /api/sandbox/compare` | Controlled deltas, per-question changes with Stage 1 metrics attached, optional real-world deltas |
+
+### Configuration (`cl-workers/.env`)
+
+| Variable | Default | Meaning |
+| :--- | :--- | :--- |
+| `STAGE1_RUNS_PER_QUERY` | `15` | N repeated observations per query |
+| `STAGE1_QUERY_COUNT` | `10` | Queries selected when generating them |
+| `STAGE1_EVIDENCE_TOKEN_BUDGET` | `20000` | Total evidence tokens per query |
+| `STAGE1_PER_SOURCE_TOKEN_CAP` | `1000` | Maximum evidence tokens per source |
+| `STAGE1_MIN_SOURCE_TOKENS` | `200` | Floor per source; also caps sources per query at budget ÷ floor |
+| `STAGE1_COMPRESSION_BATCH_SIZE` | `5` | Evidence calls in flight at once |
+| `STAGE1_GROUNDING_MODEL` | `gemini-2.5-flash` | Model for grounded observations (never rotated mid-run) |
+| `STAGE1_FETCHER` | `gemini_grounding` | Observation fetcher |
+| `SOURCE_CATEGORIES` | built-in list | Comma-separated taxonomy override |
+| `STAGE2_MAX_SOURCES` | `40` | Maximum merged source pool for seeded Stage 2 runs |
+| `STAGE2_CRAWL_CONCURRENCY` | `8` | Concurrent page fetches in Stage 2 |
+
+Also available: `STAGE1_OBSERVATION_CONCURRENCY`, `STAGE1_CRAWL_CONCURRENCY`, `STAGE1_MAX_PAGE_CHARS`, `STAGE1_CLASSIFICATION_BATCH_SIZE`, `STAGE1_GROUNDING_MAX_RETRIES`, and `STAGE1_RESULT_DIR` (writes each raw Stage 1 result to a JSON file).
+
+**Cost and time.** Every observation is one grounded call and every (query, source) pair one evidence call, all rate-limited (14 requests per minute per model on the free tier). The defaults (10 × 15) mean roughly 150 grounded calls and a few hundred evidence calls: expect 45+ minutes, and more than a free-tier key's daily quota. For testing, use `runs_per_query` and `query_count` of 3–5 per request.
+
+### Tests
+
+```bash
+cd citelabs/cl-workers
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Covers the token budget calculator, mean/median position, Jaccard similarity, mention vs citation rate, category breakdown percentages, source pools, seeding and tagging, and the Stage 2 orchestration in each seed mode (with every external call faked).
+
+### Content gap analysis (planned)
+
+`cl-workers/app/gap_analysis.py` defines `find_content_gaps(sandbox_evidence, competitor_evidence_list) -> List[Gap]`: the claims and topics that cited sources cover but the sandbox page does not, built from Stage 1's evidence. It is an interface only for now; the module docstring describes the intended approach.
 
 ---
 

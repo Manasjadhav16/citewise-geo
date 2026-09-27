@@ -31,6 +31,6 @@ logs/
 # Tooling caches
 .turbo/
 .eslintcache
-.tsbuildinfo
+*.tsbuildinfo
 .next/trace
 
