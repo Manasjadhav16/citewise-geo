@@ -254,19 +254,27 @@ def _percentage(count: int, total: int) -> float:
     return (count / total) * 100.0 if total else 0.0
 
 
-def mention_rate(responses: Sequence[ResponseVisibility]) -> float:
-    """AI Visibility / Mention Rate: % of responses that name the target brand."""
+def mention_rate(responses: Sequence[ResponseVisibility]) -> Optional[float]:
+    """
+    AI Visibility / Mention Rate: % of responses that name the target brand.
+    None when there are no responses: no data, which is not the same as 0%.
+    """
+    if not responses:
+        return None
     return _percentage(sum(1 for r in responses if r.mentioned), len(responses))
 
 
-def citation_rate(responses: Sequence[ResponseVisibility]) -> float:
+def citation_rate(responses: Sequence[ResponseVisibility]) -> Optional[float]:
     """
     Strict citation rate: % of responses that cite the target as a source.
+    None when there are no responses: no data, which is not the same as 0%.
 
     Not the same as sandbox.calculate_final_scores' "citation_rate", which counts
     did_sandbox_appear (mentioned OR cited) and feeds the GEO/AEO formulas; that
     one is kept unchanged so scores stay comparable with earlier runs.
     """
+    if not responses:
+        return None
     return _percentage(sum(1 for r in responses if r.cited), len(responses))
 
 

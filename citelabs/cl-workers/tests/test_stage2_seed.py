@@ -186,7 +186,11 @@ class TestSummary:
 
     def test_empty(self):
         m = summarize_stage2_metrics([], taxonomy=("other",))
-        assert (m["responses_evaluated"], m["mention_rate"], m["mean_citation_position"]) == (0, 0.0, None)
+        assert (m["responses_evaluated"], m["mention_rate"], m["strict_citation_rate"], m["mean_citation_position"]) == (0, None, None, None)
+
+    def test_only_failed_questions_is_no_data(self):
+        m = summarize_stage2_metrics([rag(False, False, answer="Error: 429", chunks=0)] * 3, taxonomy=("other",))
+        assert (m["responses_evaluated"], m["mention_rate"], m["strict_citation_rate"]) == (0, None, None)
 
     def test_error_detection(self):
         assert is_error_result({"answer": "Error: boom", "chunks_used": 0})

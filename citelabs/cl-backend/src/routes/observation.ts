@@ -88,8 +88,8 @@ type WorkerQuery = {
     domain_diversity: number;
     source_set_stability: number | null;
     domain_set_stability: number | null;
-    mention_rate: number;
-    citation_rate: number;
+    mention_rate: number | null; // null: no successful observations
+    citation_rate: number | null;
     mean_citation_position: number | null;
     median_citation_position: number | null;
   };

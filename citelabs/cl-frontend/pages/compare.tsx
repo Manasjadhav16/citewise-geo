@@ -28,7 +28,13 @@ type Comparison = {
     before: QuerySide;
     after: QuerySide;
     change: string;
-    real_world: { mention_rate: number | null; citation_rate: number | null; mean_citation_position: number | null; source_set_stability: number | null } | null;
+    real_world: {
+      successful_runs: number;
+      mention_rate: number | null;
+      citation_rate: number | null;
+      mean_citation_position: number | null;
+      source_set_stability: number | null;
+    } | null;
   }[];
   real_world: (Deltas & { before_observation: string; after_observation: string; data_disclaimer: string | null }) | null;
   data_disclaimer: string | null;
@@ -228,9 +234,11 @@ const ComparePage = () => {
                           <td className="py-3 pr-4 whitespace-nowrap">{sideText(q.after)}</td>
                           <td className="py-3 pr-4"><ChangeBadge change={q.change} /></td>
                           <td className="py-3 text-gray-400 whitespace-nowrap">
-                            {q.real_world
-                              ? `cited ${fmtPct(q.real_world.citation_rate, 0)} · mentioned ${fmtPct(q.real_world.mention_rate, 0)} · stability ${fmtNum(q.real_world.source_set_stability)}`
-                              : '—'}
+                            {!q.real_world
+                              ? '—'
+                              : q.real_world.successful_runs === 0
+                                ? <span className="text-amber-400/80">No data (no successful observations)</span>
+                                : `cited ${fmtPct(q.real_world.citation_rate, 0)} · mentioned ${fmtPct(q.real_world.mention_rate, 0)} · stability ${fmtNum(q.real_world.source_set_stability)} · ${q.real_world.successful_runs} run(s)`}
                           </td>
                         </tr>
                       ))}

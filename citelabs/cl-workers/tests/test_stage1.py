@@ -129,6 +129,14 @@ class TestQueriesAndVisibility:
     def test_mention_needs_whole_word(self):
         assert not detect_visibility("Acmeology is different", [], "acme.in", ["Acme"]).mentioned
 
+    def test_query_with_no_successful_runs_has_no_data(self):
+        # Every run failed (e.g. quota errors): rates must be "no data", not 0%
+        metrics = query_source_metrics(run_url_sets=[], run_domain_sets=[], visibilities=[])
+        assert metrics["successful_runs"] == 0
+        assert metrics["mention_rate"] is None and metrics["citation_rate"] is None
+        assert metrics["mean_citation_position"] is None and metrics["source_set_stability"] is None
+        assert metrics["source_set_diversity"] == 0  # a count: nothing was observed
+
     def test_query_metrics(self):
         metrics = query_source_metrics(
             run_url_sets=[["u1", "u2"], ["u1"]],

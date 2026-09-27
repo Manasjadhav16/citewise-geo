@@ -261,8 +261,8 @@ const ObservationPage = () => {
                   </h2>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6 text-sm">
                     <div><span className="text-gray-400">Runs:</span> {q.successfulRuns}/{q.responses.length}</div>
-                    <div><span className="text-gray-400">Mentioned:</span> {fmtPct(q.mentionRate, 0)}</div>
-                    <div><span className="text-gray-400">Cited:</span> {fmtPct(q.citationRate, 0)}</div>
+                    <div><span className="text-gray-400">Mentioned:</span> {q.successfulRuns > 0 ? fmtPct(q.mentionRate, 0) : 'no data'}</div>
+                    <div><span className="text-gray-400">Cited:</span> {q.successfulRuns > 0 ? fmtPct(q.citationRate, 0) : 'no data'}</div>
                     <div><span className="text-gray-400">Diversity:</span> {q.sourceSetDiversity ?? '—'} sources</div>
                     <div><span className="text-gray-400">Stability:</span> {fmtNum(q.sourceSetStability)}</div>
                   </div>

@@ -91,9 +91,15 @@ class TestMentionVsCitationRate:
         assert mention_rate(responses) == 0.0
         assert citation_rate(responses) == 50.0
 
-    def test_no_responses(self):
-        assert mention_rate([]) == 0.0
-        assert citation_rate([]) == 0.0
+    def test_no_responses_is_no_data_not_zero(self):
+        # Zero responses means nothing was measured; 0% would claim the brand was never mentioned/cited
+        assert mention_rate([]) is None
+        assert citation_rate([]) is None
+
+    def test_measured_zero_is_still_zero(self):
+        responses = [ResponseVisibility(mentioned=False, cited=False)]
+        assert mention_rate(responses) == 0.0
+        assert citation_rate(responses) == 0.0
 
 
 # ---------- citation position ----------

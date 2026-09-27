@@ -82,6 +82,7 @@ type RagRow = {
 
 type Stage1QueryRow = {
   query: string;
+  successfulRuns: number;
   mentionRate: number | null;
   citationRate: number | null;
   meanCitationPosition: number | null;
@@ -141,8 +142,10 @@ export function perQueryComparison(before: RagRow[], after: RagRow[], stage1Quer
         change: classifyChange(b, a),
         real_world: s1
           ? {
-              mention_rate: s1.mentionRate,
-              citation_rate: s1.citationRate,
+              successful_runs: s1.successfulRuns,
+              // No successful observations means no data, not 0% (older rows stored 0)
+              mention_rate: s1.successfulRuns > 0 ? s1.mentionRate : null,
+              citation_rate: s1.successfulRuns > 0 ? s1.citationRate : null,
               mean_citation_position: s1.meanCitationPosition,
               source_set_stability: s1.sourceSetStability,
             }
