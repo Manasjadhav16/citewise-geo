@@ -434,6 +434,7 @@ async def run_stage1_job(
                     record["query"],
                     [{"url": url, "title": context["page_title"], "page_text": target_page["page_text"]}],
                     total_budget=config.per_source_token_cap,
+                    cited_for_query=False,
                     **compression,
                 )
                 record["target_evidence"] = asdict(own)

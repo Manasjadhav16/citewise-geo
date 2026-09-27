@@ -14,6 +14,7 @@ truncated to it as a hard limit.
 """
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
@@ -42,14 +43,41 @@ def enforce_token_budget(text: str, token_budget: int) -> str:
     return cut.rstrip() + " …"
 
 
-def build_evidence_prompt(query: str, url: str, title: Optional[str], page_text: str, token_budget: int) -> str:
+NO_EVIDENCE_SENTINEL = "NO_RELEVANT_EVIDENCE"
+
+
+def is_no_evidence_reply(text: str) -> bool:
+    """
+    True when the model used the no-evidence escape hatch. Models vary the
+    spelling ("NO_Relevant_EVIDENCE", "No relevant evidence."), so letters are
+    compared case-insensitively with separators and punctuation ignored.
+    """
+    letters = re.sub(r"[^a-z]", "", (text or "").lower())
+    return letters.startswith("norelevantevidence") and len(letters) <= len("norelevantevidence") + 40
+
+
+def build_evidence_prompt(
+    query: str,
+    url: str,
+    title: Optional[str],
+    page_text: str,
+    token_budget: int,
+    cited_for_query: bool = True,
+) -> str:
     word_budget = int(token_budget * 0.75)
+    cited_note = (
+        "An AI search engine cited this page when answering this query, so it very likely contains "
+        "information that informed the answer: look for it carefully.\n\n"
+        if cited_for_query
+        else ""
+    )
     return (
         "You are preparing evidence for an answer engine that must answer a user's search query "
         "and decide which sources to cite.\n\n"
         f"Query: {query}\n"
         f"Source: {url}" + (f" ({title})" if title else "") + "\n\n"
-        "Create a compact representation containing the evidence on this page that could influence "
+        + cited_note
+        + "Create a compact representation containing the evidence on this page that could influence "
         "the answer or the citation decision for this query. Do not summarise the page in general.\n\n"
         "Extract, where present:\n"
         "- key facts, statistics and numbers (with units, dates, currencies)\n"
@@ -61,8 +89,10 @@ def build_evidence_prompt(query: str, url: str, title: Optional[str], page_text:
         "- expert statements or quotes, attributed\n"
         "- short verbatim excerpts most relevant to the query, in quotes\n\n"
         "Preserve exact figures and wording rather than paraphrasing. Omit navigation, boilerplate "
-        "and anything irrelevant to the query. Use terse bullet points. If the page has no evidence "
-        "relevant to the query, reply exactly: NO_RELEVANT_EVIDENCE\n"
+        "and anything irrelevant to the query. Use terse bullet points.\n\n"
+        "Partial relevance counts: if the page covers the query's topic, products, entities or related "
+        "statistics without answering it exactly, extract that evidence. Only if the page has nothing at "
+        f"all to do with the query's subject, reply exactly: {NO_EVIDENCE_SENTINEL}\n"
         f"Stay under {word_budget} words.\n\n"
         f"PAGE CONTENT:\n{page_text}"
     )
@@ -87,8 +117,9 @@ async def extract_evidence(
     token_budget: int,
     max_page_chars: int,
     llm,
+    cited_for_query: bool = True,
 ) -> EvidenceResult:
-    prompt = build_evidence_prompt(query, url, title, page_text[:max_page_chars], token_budget)
+    prompt = build_evidence_prompt(query, url, title, page_text[:max_page_chars], token_budget, cited_for_query)
     started = time.monotonic()
     # Output headroom above the budget: thinking models spend part of max_tokens
     # before answering. The budget itself is enforced on the returned text.
@@ -101,7 +132,7 @@ async def extract_evidence(
     text = (response or "").strip()
     if not text:
         raise ValueError("empty evidence response")
-    relevant = "NO_RELEVANT_EVIDENCE" not in text[:40]
+    relevant = not is_no_evidence_reply(text)
     evidence = enforce_token_budget(text, token_budget) if relevant else None
     return EvidenceResult(
         url=url,
@@ -123,6 +154,7 @@ async def compress_query_sources(
     max_page_chars: int,
     llm=None,
     semaphore: Optional[asyncio.Semaphore] = None,
+    cited_for_query: bool = True,
 ) -> List[EvidenceResult]:
     """
     Compress every source for one query. `sources` items need url, title and
@@ -131,7 +163,8 @@ async def compress_query_sources(
     The per-source budget is computed from the number of sources. At most
     `batch_size` calls are in flight at once, as a rolling window rather than
     fixed groups, so one slow call doesn't hold up the others. Pass a shared
-    `semaphore` to apply one window across several queries. Calls run under
+    `semaphore` to apply one window across several queries. cited_for_query tells
+    the model the observed engine cited these pages for the query. Calls run under
     asyncio.gather(return_exceptions=True): one failure never stops the rest.
     """
     if llm is None:
@@ -148,7 +181,8 @@ async def compress_query_sources(
             raise ValueError(source.get("crawl_error") or "page content unavailable")
         async with window:
             return await extract_evidence(
-                query, source["url"], source.get("title"), source["page_text"], budget, max_page_chars, llm
+                query, source["url"], source.get("title"), source["page_text"], budget, max_page_chars, llm,
+                cited_for_query,
             )
 
     outcomes = await asyncio.gather(*(compress(s) for s in sources), return_exceptions=True)

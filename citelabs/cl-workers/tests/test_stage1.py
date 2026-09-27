@@ -14,7 +14,13 @@ from app.observation.categorize import (
     resolve_category,
 )
 from app.observation.config import Stage1Config
-from app.observation.evidence import compress_query_sources, enforce_token_budget, estimate_tokens
+from app.observation.evidence import (
+    build_evidence_prompt,
+    compress_query_sources,
+    enforce_token_budget,
+    estimate_tokens,
+    is_no_evidence_reply,
+)
 from app.observation.fetchers import build_citations, domain_from_title, is_utility_result
 from app.observation.stage1_job import (
     brand_terms,
@@ -181,6 +187,27 @@ class TestCategorization:
 # ---------- evidence ----------
 
 class TestEvidence:
+    @pytest.mark.parametrize(
+        "reply,expected",
+        [
+            ("NO_RELEVANT_EVIDENCE", True),
+            ("NO_Relevant_EVIDENCE", True),  # seen from a live model
+            ("No relevant evidence.", True),
+            ("  **NO RELEVANT EVIDENCE**\n", True),
+            ("- Fact: no relevant evidence of fees was found, but UPI share is 80%", False),
+            ("- UPI success rate: 97%", False),
+            ("", False),
+        ],
+    )
+    def test_no_evidence_detection(self, reply, expected):
+        assert is_no_evidence_reply(reply) is expected
+
+    def test_prompt_mentions_citation_only_for_cited_pages(self):
+        cited = build_evidence_prompt("q", "https://a.com", None, "text", 400)
+        own = build_evidence_prompt("q", "https://a.com", None, "text", 400, cited_for_query=False)
+        assert "cited this page" in cited and "cited this page" not in own
+        assert "Partial relevance counts" in cited and "Stay under 300 words" in cited
+
     def test_token_helpers(self):
         assert estimate_tokens("abcd" * 10) == 10
         assert estimate_tokens("abcde") == 2
