@@ -148,6 +148,8 @@ model SandboxRagResult {
   sandboxCitations          String[]        @map("sandbox_citations")
   businessCompetitorCitations String[]      @map("business_competitor_citations")
   authoritySourceCitations  String[]       @map("authority_source_citations")
+  diagnosisType             String?         @map("diagnosis_type")
+  diagnosisDetail           String?         @map("diagnosis_detail")
   createdAt                 DateTime        @default(now()) @map("created_at")
   run                       SandboxRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
   questionRef               SandboxQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)

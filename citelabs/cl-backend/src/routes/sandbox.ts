@@ -395,6 +395,8 @@ export default async function sandboxRoutes(app: FastifyInstance) {
               sandboxCitations: ragResult.sandbox_citations || [],  // FINAL - source of truth
               businessCompetitorCitations: ragResult.business_competitor_citations || [],  // FINAL - source of truth
               authoritySourceCitations: ragResult.authority_source_citations || [],  // FINAL - source of truth
+              diagnosisType: ragResult.diagnosis_type ?? null,
+              diagnosisDetail: sanitizeText(ragResult.diagnosis_detail) ?? null,
               metrics: ragResult.metrics ? {
                 create: {
                   id: `metrics_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

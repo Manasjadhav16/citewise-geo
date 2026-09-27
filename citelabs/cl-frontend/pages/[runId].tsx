@@ -50,6 +50,8 @@ type SandboxRagResult = {
   chunksUsed: number;
   competitorCitations: string[];
   sandboxCitations: string[];
+  diagnosisType?: 'competitor_advantage' | 'content_gap' | null;
+  diagnosisDetail?: string | null;
   questionRef?: {
     type: string;
   };
@@ -538,12 +540,27 @@ const RunDetails = () => {
                             >
                               {rag.didSandboxAppear ? '✓ Cited' : '✗ Not Cited'}
                             </span>
+                            {rag.diagnosisType && (
+                              <span
+                                className={`text-xs px-3 py-1 rounded-full ${rag.diagnosisType === 'competitor_advantage'
+                                  ? 'bg-orange-500/20 text-orange-300'
+                                  : 'bg-purple-500/20 text-purple-300'
+                                  }`}
+                              >
+                                {rag.diagnosisType === 'competitor_advantage' ? 'Competitor advantage' : 'Content gap'}
+                              </span>
+                            )}
                             <span className="text-xs px-3 py-1 rounded-full bg-blue-500/20 text-blue-300">
                               {rag.chunksUsed} chunks
                             </span>
                           </div>
                         </div>
                         <p className="text-gray-300 mb-3">{rag.answer}</p>
+                        {rag.diagnosisDetail && (
+                          <p className="text-sm text-gray-400 mb-3">
+                            <strong>Why:</strong> {rag.diagnosisDetail}
+                          </p>
+                        )}
                         {(rag.sandboxCitations.length > 0 || rag.competitorCitations.length > 0) && (
                           <div className="text-xs text-gray-400 space-y-1">
                             <div>
