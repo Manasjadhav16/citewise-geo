@@ -8,6 +8,7 @@ import simulationRoutes from './routes/simulation';
 import sandboxRoutes from './routes/sandbox';
 import stagingRoutes from './routes/staging';
 import chatRoutes from './routes/chat';
+import observationRoutes from './routes/observation';
 
 export const createServer = (): FastifyInstance => {
   const app = Fastify({
@@ -24,6 +25,7 @@ export const createServer = (): FastifyInstance => {
   app.register(sandboxRoutes);
   app.register(stagingRoutes);
   app.register(chatRoutes);
+  app.register(observationRoutes);
 
   return app;
 };

@@ -261,4 +261,160 @@ model UsageLog {
   @@map("usage_logs")
 }
 
+// ==========================================
+// Stage 1: Real-World Observation
+// ==========================================
+// Repeated search-grounded answers per query and the sources they cite.
+// The default fetcher (Gemini + Google Search grounding) is an approximate
+// proxy for Google AI Overview citations, NOT real AI Overview data.
 
+model ObservationRun {
+  id               String   @id @default(cuid())
+  sandboxUrl       String   @map("sandbox_url")
+  status           String // pending | running | completed | failed
+  fetcher          String?
+  dataDisclaimer   String?  @map("data_disclaimer")
+  config           Json? // runs_per_query, query_count, token budgets, taxonomy, ...
+  context          Json? // brand, business category, page intent, domain summary
+  requestedQueries String[] @map("requested_queries")
+  error            String?
+
+  // Run-level aggregates
+  runsAttempted            Int?   @map("runs_attempted")
+  runsSucceeded            Int?   @map("runs_succeeded")
+  uniqueSources            Int?   @map("unique_sources")
+  uniqueDomains            Int?   @map("unique_domains")
+  mentionRate              Float? @map("mention_rate")
+  citationRate             Float? @map("citation_rate")
+  meanCitationPosition     Float? @map("mean_citation_position")
+  medianCitationPosition   Float? @map("median_citation_position")
+  meanSourceSetDiversity   Float? @map("mean_source_set_diversity")
+  meanSourceSetStability   Float? @map("mean_source_set_stability")
+  meanDomainSetStability   Float? @map("mean_domain_set_stability")
+  categoryBreakdown        Json?  @map("category_breakdown") // % of citations per category
+  competitorGroupBreakdown Json?  @map("competitor_group_breakdown") // target / direct_business / ai_visibility
+  sourceCategories         Json?  @map("source_categories") // per domain: final, llm and heuristic labels
+
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @default(now()) @updatedAt @map("updated_at")
+  queries   ObservationQuery[]
+  events    ObservationEvent[]
+
+  @@map("observation_runs")
+}
+
+model ObservationQuery {
+  id            String  @id @default(cuid())
+  observationId String  @map("observation_id")
+  queryIndex    Int     @map("query_index")
+  query         String
+  queryType     String? @map("query_type")
+
+  successfulRuns         Int    @default(0) @map("successful_runs")
+  sourceSetDiversity     Int?   @map("source_set_diversity")
+  domainDiversity        Int?   @map("domain_diversity")
+  sourceSetStability     Float? @map("source_set_stability") // mean pairwise Jaccard, URLs
+  domainSetStability     Float? @map("domain_set_stability") // mean pairwise Jaccard, domains
+  mentionRate            Float? @map("mention_rate")
+  citationRate           Float? @map("citation_rate")
+  meanCitationPosition   Float? @map("mean_citation_position")
+  medianCitationPosition Float? @map("median_citation_position")
+  targetEvidence         Json?  @map("target_evidence") // sandbox page's evidence for this query
+
+  observation ObservationRun        @relation(fields: [observationId], references: [id], onDelete: Cascade)
+  responses   ObservationResponse[]
+  sources     ObservationSource[]
+
+  @@index([observationId])
+  @@map("observation_queries")
+}
+
+// One observed answer: query x run index
+model ObservationResponse {
+  id              String   @id @default(cuid())
+  observationId   String   @map("observation_id")
+  queryId         String   @map("query_id")
+  runIndex        Int      @map("run_index")
+  ok              Boolean
+  error           String?
+  model           String?
+  latencySeconds  Float?   @map("latency_seconds")
+  answerText      String?  @map("answer_text")
+  searchQueries   String[] @map("search_queries")
+  targetMentioned Boolean? @map("target_mentioned")
+  targetCited     Boolean? @map("target_cited")
+  targetPosition  Int?     @map("target_position")
+
+  query     ObservationQuery      @relation(fields: [queryId], references: [id], onDelete: Cascade)
+  citations ObservationCitation[]
+
+  @@index([queryId])
+  @@index([observationId])
+  @@map("observation_responses")
+}
+
+// Raw per-run citation list (kept for stability / Jaccard analysis)
+model ObservationCitation {
+  id            String  @id @default(cuid())
+  responseId    String  @map("response_id")
+  position      Int // 1-based: cited-in-answer sources first, by first appearance
+  rawUri        String  @map("raw_uri")
+  url           String?
+  domain        String
+  title         String?
+  citedInAnswer Boolean @map("cited_in_answer")
+  isWebSource   Boolean @map("is_web_source")
+
+  response ObservationResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@index([responseId])
+  @@index([domain])
+  @@map("observation_citations")
+}
+
+// Union source pool per query, with category and evidence
+model ObservationSource {
+  id                     String   @id @default(cuid())
+  observationId          String   @map("observation_id")
+  queryId                String   @map("query_id")
+  sourceKey              String   @map("source_key")
+  url                    String?
+  domain                 String
+  title                  String?
+  category               String
+  categorySource         String   @map("category_source") // target_domain_match | llm | heuristic | fallback
+  llmCategory            String?  @map("llm_category")
+  heuristicCategory      String?  @map("heuristic_category")
+  competitorGroup        String   @map("competitor_group") // target | direct_business | ai_visibility
+  stability              Float // appearances / N
+  appearances            Int
+  overSourceCap          Boolean  @default(false) @map("over_source_cap")
+  crawlError             String?  @map("crawl_error")
+  evidence               String?
+  evidenceTokenBudget    Int?     @map("evidence_token_budget")
+  evidenceTokenEstimate  Int?     @map("evidence_token_estimate")
+  hasRelevantEvidence    Boolean? @map("has_relevant_evidence")
+  evidenceError          String?  @map("evidence_error")
+  evidenceLatencySeconds Float?   @map("evidence_latency_seconds")
+
+  query ObservationQuery @relation(fields: [queryId], references: [id], onDelete: Cascade)
+
+  @@index([queryId])
+  @@index([observationId])
+  @@index([domain])
+  @@map("observation_sources")
+}
+
+model ObservationEvent {
+  id            String         @id @default(cuid())
+  eventId       String         @unique @map("event_id")
+  observationId String         @map("observation_id")
+  step          String
+  status        String
+  payload       Json?
+  timestamp     DateTime       @default(now())
+  observation   ObservationRun @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@index([observationId])
+  @@map("observation_events")
+}

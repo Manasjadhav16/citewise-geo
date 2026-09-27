@@ -230,6 +230,29 @@ export class Worker {
     }
   }
 
+  async startStage1(payload: {
+    observation_id: string;
+    url: string;
+    queries?: string[];
+    runs_per_query?: number;
+    query_count?: number;
+  }): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/stage1/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        `Worker /stage1/start request failed with status ${response.status}: ${errorBody || 'no body'}`,
+      );
+    }
+  }
+
   async processChatMessage(payload: {
     session_id: string;
     content: string;
