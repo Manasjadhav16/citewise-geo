@@ -208,7 +208,33 @@ export class Worker {
     return response.json();
   }
 
-  async startJob(payload: { run_id: string; url: string; model_name?: string }): Promise<void> {
+  async compare(payload: {
+    before: Record<string, number | null>;
+    after: Record<string, number | null>;
+  }): Promise<{
+    geo_improvement: number | null;
+    aeo_improvement: number | null;
+    deltas: Record<string, { before: number | null; after: number | null; delta: number | null }>;
+  }> {
+    const response = await fetch(`${this.baseUrl}/compare`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        `Worker /compare request failed with status ${response.status}: ${errorBody || 'no body'}`,
+      );
+    }
+
+    return (await response.json()) as any;
+  }
+
+  async startJob(payload: { run_id: string; url: string; model_name?: string; seed?: unknown }): Promise<void> {
     const finalPayload = {
       ...payload,
       model_name: payload.model_name || DEFAULT_MODEL_NAME,

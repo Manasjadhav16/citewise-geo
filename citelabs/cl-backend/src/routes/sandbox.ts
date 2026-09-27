@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { worker } from '../services/pythonClient';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { resolveRunSeed, RunSeedError } from '../services/runSeed';
 
 const prisma = new PrismaClient();
 
@@ -18,6 +19,11 @@ function sanitizeText(text: string | null | undefined): string | null {
 type SandboxRunBody = {
   url: string;
   model_name?: string;
+  // Two-stage GEO (see services/runSeed.ts)
+  observation_id?: string;
+  run_tag?: string;
+  baseline_run_id?: string;
+  dry_run?: boolean; // validate and return the seed without starting a run
 };
 
 type ProgressEventBody = {
@@ -35,7 +41,15 @@ type ResultBody = {
   competitors?: Array<any>;
   rag_results?: Array<any>;
   scores?: any;
+  // Two-stage GEO
+  source_pool?: Array<any>;
+  seed_mode?: string | null;
+  pool_counts?: Record<string, unknown>;
 };
+
+function jsonOrNull(value: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return value == null ? Prisma.DbNull : (value as Prisma.InputJsonValue);
+}
 
 export default async function sandboxRoutes(app: FastifyInstance) {
   // ==========================================
@@ -51,6 +65,26 @@ export default async function sandboxRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Invalid URL provided' });
     }
 
+    // Two-stage GEO: Stage 1 seeding / before-after tagging
+    let resolved;
+    try {
+      resolved = await resolveRunSeed(prisma, body);
+    } catch (err) {
+      if (err instanceof RunSeedError) {
+        return reply.status(err.statusCode).send({ error: err.message });
+      }
+      throw err;
+    }
+    if (body.dry_run) {
+      return reply.status(200).send({
+        dry_run: true,
+        observation_id: resolved.observationId,
+        run_tag: resolved.runTag,
+        baseline_run_id: resolved.baselineRunId,
+        seed: resolved.seed,
+      });
+    }
+
     try {
       // Generate run_id
       const runId = `run_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -60,12 +94,16 @@ export default async function sandboxRoutes(app: FastifyInstance) {
         data: {
           id: runId,
           sandboxUrl: url,
-          status: 'processing'
+          status: 'processing',
+          observationId: resolved.observationId,
+          runTag: resolved.runTag,
+          baselineRunId: resolved.baselineRunId,
+          seedMode: resolved.seed?.mode ?? null,
         },
       });
 
       // Fire-and-forget: Start job in Python worker
-      worker.startJob({ run_id: runId, url, model_name }).catch((err) => {
+      worker.startJob({ run_id: runId, url, model_name, seed: resolved.seed ?? undefined }).catch((err) => {
         app.log.error({ err, runId }, 'Failed to start job in worker');
         // Update status to error
         prisma.sandboxRun
@@ -174,6 +212,17 @@ export default async function sandboxRoutes(app: FastifyInstance) {
       }
 
       // If completed, return full data
+      // Two-stage GEO: how this run was seeded and what it reused
+      const twoStage = {
+        observation_id: run.observationId ?? null,
+        run_tag: run.runTag ?? null,
+        baseline_run_id: run.baselineRunId ?? null,
+        seed_mode: run.seedMode ?? null,
+        question_set: run.questionSet ?? null,
+        source_pool: run.sourcePool ?? null,
+        pool_counts: run.poolCounts ?? null,
+      };
+
       if (run.status === 'completed') {
         return reply.status(200).send({
           run_id: run.id,
@@ -185,6 +234,7 @@ export default async function sandboxRoutes(app: FastifyInstance) {
           scores: run.scores || null,
           advanced_metrics: advancedMetrics, // NEW: metrics object
           recommendations: run.scores?.recommendations || [],
+          two_stage: twoStage,
         });
       }
 
@@ -195,6 +245,7 @@ export default async function sandboxRoutes(app: FastifyInstance) {
         recent_events: run.events || [],
         // Also verify intermediate progress if ragResults exist (optional but helpful)
         rag_results_count: run.ragResults.length,
+        two_stage: twoStage,
       });
     } catch (error) {
       app.log.error({ err: error, run_id }, 'Failed to get sandbox run');
@@ -353,6 +404,10 @@ export default async function sandboxRoutes(app: FastifyInstance) {
               fullText: sanitizeText(comp.full_text),
               sourceType: comp.source_type || 'competitor', // Use source_type from data (serp/llm), fallback to 'competitor'
               domainType: comp.domain_type || 'editorial', // P2: Store domain type (sandbox_brand/business_competitor/editorial)
+              sourceCategory: comp.source_category ?? null,
+              competitorGroup: comp.competitor_group ?? null,
+              categorySource: comp.category_source ?? null,
+              origin: comp.origin ?? null,
             } as any, // Type assertion needed until TypeScript server picks up regenerated Prisma types
           });
         }
@@ -397,6 +452,9 @@ export default async function sandboxRoutes(app: FastifyInstance) {
               authoritySourceCitations: ragResult.authority_source_citations || [],  // FINAL - source of truth
               diagnosisType: ragResult.diagnosis_type ?? null,
               diagnosisDetail: sanitizeText(ragResult.diagnosis_detail) ?? null,
+              sandboxCitationPosition: ragResult.sandbox_citation_position ?? null,
+              citedSourceCategories: jsonOrNull(ragResult.cited_source_categories),
+              retrievedSourceCategories: jsonOrNull(ragResult.retrieved_source_categories),
               metrics: ragResult.metrics ? {
                 create: {
                   id: `metrics_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -415,6 +473,15 @@ export default async function sandboxRoutes(app: FastifyInstance) {
 
       // Store scores
       if (body.scores) {
+        const twoStageScores = {
+          responsesEvaluated: body.scores.responses_evaluated ?? null,
+          mentionRate: body.scores.mention_rate ?? null,
+          strictCitationRate: body.scores.strict_citation_rate ?? null,
+          meanCitationPosition: body.scores.mean_citation_position ?? null,
+          medianCitationPosition: body.scores.median_citation_position ?? null,
+          categoryBreakdown: jsonOrNull(body.scores.category_breakdown),
+          competitorGroupBreakdown: jsonOrNull(body.scores.competitor_group_breakdown),
+        };
         await prisma.sandboxScore.upsert({
           where: { runId: run_id },
           create: {
@@ -429,6 +496,7 @@ export default async function sandboxRoutes(app: FastifyInstance) {
             schemaGaps: (body.scores.schema_gaps || []).map((item: string) => sanitizeText(item) || ''),
             structuredDataOps: (body.scores.structured_data_ops || []).map((item: string) => sanitizeText(item) || ''),
             recommendations: (body.scores.recommendations || []).map((item: string) => sanitizeText(item) || ''),
+            ...twoStageScores,
           },
           update: {
             geoScore: body.scores.geo_score || 0,
@@ -440,14 +508,21 @@ export default async function sandboxRoutes(app: FastifyInstance) {
             schemaGaps: (body.scores.schema_gaps || []).map((item: string) => sanitizeText(item) || ''),
             structuredDataOps: (body.scores.structured_data_ops || []).map((item: string) => sanitizeText(item) || ''),
             recommendations: (body.scores.recommendations || []).map((item: string) => sanitizeText(item) || ''),
+            ...twoStageScores,
           },
         });
       }
 
-      // Mark run as completed
+      // Mark run as completed, storing the exact question set and source pool
+      // so an "after" run can reuse them
       await prisma.sandboxRun.update({
         where: { id: run_id },
-        data: { status: 'completed' },
+        data: {
+          status: 'completed',
+          questionSet: jsonOrNull((body.questions || []).filter((q) => q.type !== 'SERP')),
+          sourcePool: jsonOrNull(body.source_pool),
+          poolCounts: jsonOrNull(body.pool_counts),
+        },
       });
 
       return reply.status(200).send({ message: 'Result stored successfully' });

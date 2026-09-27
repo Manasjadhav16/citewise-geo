@@ -169,6 +169,8 @@ class StartJobRequest(BaseModel):
     run_id: str
     url: HttpUrl
     model_name: Optional[str] = None
+    # Two-stage GEO seed (see async_job.run_full_job): mode "stage1" or "baseline"
+    seed: Optional[Dict[str, Any]] = None
 
 
 @app.post("/start-job")
@@ -180,7 +182,19 @@ async def start_job_endpoint(payload: StartJobRequest):
     import asyncio
 
     # Start job in background task
-    asyncio.create_task(async_job.run_full_job(payload.run_id, str(payload.url), payload.model_name))
+    from fastapi import HTTPException
+
+    seed = payload.seed
+    if seed is not None:
+        mode = seed.get("mode")
+        if mode not in ("stage1", "baseline"):
+            raise HTTPException(status_code=400, detail="seed.mode must be 'stage1' or 'baseline'")
+        if not seed.get("questions"):
+            raise HTTPException(status_code=400, detail="seed.questions is required")
+        if mode == "baseline" and not seed.get("source_pool"):
+            raise HTTPException(status_code=400, detail="seed.source_pool is required for a baseline seed")
+
+    asyncio.create_task(async_job.run_full_job(payload.run_id, str(payload.url), payload.model_name, seed))
 
     return {"message": "Job started", "run_id": payload.run_id}
 

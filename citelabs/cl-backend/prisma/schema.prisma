@@ -52,6 +52,18 @@ model SandboxRun {
   events      JobEvent[]
   chatSessions ChatSession[]       // Link to chat sessions
 
+  // Two-stage GEO
+  observationId String?  @map("observation_id")   // Stage 1 observation this run was seeded from
+  runTag        String?  @map("run_tag")          // before | after
+  baselineRunId String?  @map("baseline_run_id")  // for "after" runs
+  seedMode      String?  @map("seed_mode")        // stage1 | baseline | null (unseeded)
+  questionSet   Json?    @map("question_set")     // exact questions asked (reused by "after" runs)
+  sourcePool    Json?    @map("source_pool")      // exact source pool crawled (reused by "after" runs)
+  poolCounts    Json?    @map("pool_counts")
+
+  @@index([observationId])
+  @@index([baselineRunId])
+
   @@map("sandbox_runs")
 }
 
@@ -111,6 +123,10 @@ model SandboxCompetitor {
   fullText   String?    @map("full_text")
   sourceType String     @default("competitor") @map("source_type")
   domainType String?    @default("editorial") @map("domain_type")
+  sourceCategory  String? @map("source_category")   // two-stage GEO category (Stage 1's when seeded)
+  competitorGroup String? @map("competitor_group")  // target | direct_business | ai_visibility
+  categorySource  String? @map("category_source")
+  origin          String?                           // stage1 | discovery
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @default(now()) @updatedAt @map("updated_at")
   run        SandboxRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -150,6 +166,9 @@ model SandboxRagResult {
   authoritySourceCitations  String[]       @map("authority_source_citations")
   diagnosisType             String?         @map("diagnosis_type")
   diagnosisDetail           String?         @map("diagnosis_detail")
+  sandboxCitationPosition   Int?            @map("sandbox_citation_position")
+  citedSourceCategories     Json?           @map("cited_source_categories")
+  retrievedSourceCategories Json?           @map("retrieved_source_categories")
   createdAt                 DateTime        @default(now()) @map("created_at")
   run                       SandboxRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
   questionRef               SandboxQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
@@ -170,6 +189,14 @@ model SandboxScore {
   schemaGaps          String[]   @map("schema_gaps")
   structuredDataOps   String[]   @map("structured_data_ops")
   recommendations     String[]
+  // Two-stage GEO metrics (GEO/AEO formulas and citationRate above are unchanged)
+  responsesEvaluated       Int?   @map("responses_evaluated")
+  mentionRate              Float? @map("mention_rate")
+  strictCitationRate       Float? @map("strict_citation_rate")
+  meanCitationPosition     Float? @map("mean_citation_position")
+  medianCitationPosition   Float? @map("median_citation_position")
+  categoryBreakdown        Json?  @map("category_breakdown")
+  competitorGroupBreakdown Json?  @map("competitor_group_breakdown")
   createdAt           DateTime   @default(now()) @map("created_at")
   updatedAt           DateTime   @default(now()) @updatedAt @map("updated_at")
   run                 SandboxRun @relation(fields: [runId], references: [id], onDelete: Cascade)

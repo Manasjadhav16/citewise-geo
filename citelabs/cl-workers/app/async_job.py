@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 import httpx
 
-from . import crawl, sandbox
+from . import crawl, sandbox, stage2_seed
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,12 @@ async def _send_final_result(run_id: str, result: Dict[str, Any]):
         logger.error(f"Error sending final result: {exc}")
 
 
-async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
+async def run_full_job(
+    run_id: str,
+    url: str,
+    model_name: Optional[str] = None,
+    seed: Optional[Dict[str, Any]] = None,
+):
     """
     Run the complete 7-step sandbox analysis pipeline.
 
@@ -93,7 +98,17 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
         run_id: Unique run identifier
         url: Sandbox URL to analyze
         model_name: Optional model name to use for LLM calls
+        seed: Optional two-stage GEO seed, built by the backend:
+            {"mode": "stage1", "questions": [...], "stage1_sources": [...]}:
+                questions are Stage 1's queries; the source pool is Stage 1's
+                union pool merged with this run's own SERP/LLM discovery.
+            {"mode": "baseline", "questions": [...], "source_pool": [...]}:
+                an "after" run reusing its baseline's exact questions and source
+                pool (no discovery), so only the pages themselves are re-crawled.
     """
+    seed = seed or {}
+    seed_mode = seed.get("mode")
+    pool_counts: Dict[str, Any] = {}
     # DO NOT hardcode model_name - let each step use get_model_for_role() / get_model_for_step()
     # model_name parameter is kept for backward compatibility but should be None
     if model_name:
@@ -249,15 +264,25 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
             page_intent = sandbox_data.get("intent", "")
             page_content = sandbox_data.get("full_text", "")
 
-            questions = await sandbox.generate_user_questions(
-                page_intent=page_intent,
-                business_category=business_category,  # NEW: Pass category
-                domain_summary=domain_summary,  # NEW: Pass domain summary
-                model_name=model_name,
-            )
+            if seed.get("questions"):
+                # Seeded: Stage 1's queries, or the baseline run's exact questions
+                questions = [
+                    {"type": q.get("type") or "intent", "q": q["q"]}
+                    for q in seed["questions"]
+                    if q.get("q") and q.get("type") != "SERP"
+                ]
+                if not questions:
+                    raise Exception("Seed contained no usable questions")
+            else:
+                questions = await sandbox.generate_user_questions(
+                    page_intent=page_intent,
+                    business_category=business_category,  # NEW: Pass category
+                    domain_summary=domain_summary,  # NEW: Pass domain summary
+                    model_name=model_name,
+                )
 
-            if not questions or len(questions) < 10:
-                raise Exception(f"Generated only {len(questions)} questions, expected 15")
+                if not questions or len(questions) < 10:
+                    raise Exception(f"Generated only {len(questions)} questions, expected 15")
 
             _log_structured(
                 "INFO",
@@ -270,7 +295,7 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
                 run_id,
                 "questions_generation",
                 "success",
-                {"count": len(questions), "types": [q.get("type") for q in questions]},
+                {"count": len(questions), "types": [q.get("type") for q in questions], "seeded": bool(seed.get("questions"))},
             )
         except Exception as exc:
             _log_structured("ERROR", run_id, "questions_generation", f"Question generation failed: {exc}")
@@ -303,17 +328,33 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
             # The actual execution of these 3 queries happens downstream in the crawler/searcher.
             # For this specific step, we keep the call as is because it's a single coordinating
             # function, but we mark it as part of the parallel pipeline being orchestrated.
-            competitor_result = await sandbox.extract_competitors_from_questions(
-                questions=questions,
-                page_intent=page_intent,
-                business_category=business_category,
-                sandbox_title=sandbox_data.get("title"),
-                sandbox_url=url,
-                model_name=model_name,
-            )
+            if seed_mode == "baseline":
+                # "After" run: the baseline's exact pool, no discovery, so the
+                # score change reflects the website rather than setup variance
+                competitor_urls_list = [dict(entry) for entry in seed.get("source_pool") or []]
+                serp_queries = []
+                pool_counts = {"reused_from_baseline": len(competitor_urls_list)}
+            else:
+                competitor_result = await sandbox.extract_competitors_from_questions(
+                    questions=questions,
+                    page_intent=page_intent,
+                    business_category=business_category,
+                    sandbox_title=sandbox_data.get("title"),
+                    sandbox_url=url,
+                    model_name=model_name,
+                )
+                discovered = competitor_result.get("competitor_urls", [])
+                serp_queries = competitor_result.get("serp_queries", [])
 
-            competitor_urls_list = competitor_result.get("competitor_urls", [])
-            serp_queries = competitor_result.get("serp_queries", [])
+                if seed_mode == "stage1":
+                    stage1_pool, skipped = stage2_seed.build_stage1_pool(seed.get("stage1_sources") or [], url)
+                    competitor_urls_list, pool_counts = stage2_seed.merge_source_pools(
+                        stage1_pool, discovered, url, stage2_seed.max_sources_from_env()
+                    )
+                    pool_counts["stage1_skipped"] = skipped
+                else:
+                    # Unseeded: same pages as before, just labelled
+                    competitor_urls_list = stage2_seed.annotate_discovered(discovered)
 
             if not competitor_urls_list:
                 logger.warning(f"No competitors extracted for run {run_id}")
@@ -339,6 +380,8 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
                     "count": len(competitor_urls_list),
                     "serp_queries_count": len(serp_queries),
                     "urls": [c.get("url") for c in competitor_urls_list[:5]],  # First 5 for preview
+                    "seed_mode": seed_mode,
+                    "pool_counts": pool_counts,
                 },
             )
         except Exception as exc:
@@ -485,6 +528,9 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
             except Exception:
                 pass
 
+        # domain -> (category, group) for tagging every cited and retrieved source
+        source_categories = stage2_seed.category_lookup(competitor_urls_list or [])
+
         # Create list of coroutines for parallel execution
         rag_tasks = []
         total_questions = len(questions)
@@ -505,8 +551,9 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
                     competitor_urls=competitor_urls_list,
                     sandbox_brand_name=sandbox_brand_name,
                     model_name=model_name,
+                    source_categories=source_categories,
                 )
-                
+
                 end_ts = datetime.now().strftime("%H:%M:%S")
                 print(f"[{end_ts}] DONE  {index}/{total_questions}: {q_dict.get('type', 'unknown')}")
                 return result
@@ -605,6 +652,8 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
                 business_category=business_category,  # NEW: Pass category for reality score
                 competitor_urls=competitor_urls_list if 'competitor_urls_list' in locals() else None,  # NEW: Pass competitors for reality score
             )
+            # Two-stage GEO metrics, alongside (not replacing) the GEO/AEO scores
+            scores.update(stage2_seed.summarize_stage2_metrics(rag_results))
 
             _log_structured(
                 "INFO",
@@ -634,6 +683,10 @@ async def run_full_job(run_id: str, url: str, model_name: Optional[str] = None):
                     for q in questions
                 ],
                 "competitors": competitors_data,  # Already sanitized in crawl_and_store_competitors
+                # Two-stage GEO: the exact pool crawled (reused by "after" runs) and how it was built
+                "source_pool": competitor_urls_list,
+                "seed_mode": seed_mode,
+                "pool_counts": pool_counts,
                 "rag_results": [
                     {
                         **r,

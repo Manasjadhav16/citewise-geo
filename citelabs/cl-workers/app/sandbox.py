@@ -30,6 +30,7 @@ from .chunkers.factory import get_chunker
 from .chunkers import Document as ChunkerDocument
 from .llm_providers.factory import get_llm_provider
 from .constants import get_model_for_step, get_model_for_role
+from .stage2_seed import tag_rag_result
 logger = logging.getLogger(__name__)
 
 # Backend URL for chunk persistence
@@ -2482,8 +2483,15 @@ async def crawl_and_store_competitors(
     # Extract just URLs for crawling
     urls = [comp["url"] for comp in competitor_list]
     
-    # Crawl competitors in parallel
-    competitor_tasks = [crawl.crawl_url(url) for url in urls]
+    # Crawl competitors in parallel, text only: crawl_url's LLM page summary was
+    # never used here, and a Stage 1-seeded pool can hold dozens of pages
+    crawl_sem = asyncio.Semaphore(int(os.getenv("STAGE2_CRAWL_CONCURRENCY", "8")))
+
+    async def _crawl(url: str) -> Dict[str, Any]:
+        async with crawl_sem:
+            return await crawl.crawl_text(url)
+
+    competitor_tasks = [_crawl(url) for url in urls]
     competitor_results = await asyncio.gather(*competitor_tasks, return_exceptions=True)
 
     competitors_data = []
@@ -2555,6 +2563,11 @@ async def crawl_and_store_competitors(
             "full_text": _sanitize_text(full_text),
             "source_type": source_type,  # Include source_type in competitor data
             "domain_type": comp_domain_type,  # P2: Include domain_type for database storage
+            # Two-stage GEO: category labels (Stage 1's when seeded)
+            "source_category": comp_info.get("source_category"),
+            "competitor_group": comp_info.get("competitor_group"),
+            "category_source": comp_info.get("category_source"),
+            "origin": comp_info.get("origin"),
         })
         
         # Chunk competitor content
@@ -2883,9 +2896,13 @@ async def run_rag_simulation(
     competitor_urls: Optional[List[Dict[str, Any]]] = None,
     sandbox_brand_name: Optional[str] = None,
     model_name: Optional[str] = None,
+    source_categories: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Step 6: For each question, perform RAG simulation using RAG_ANSWERING model.
+
+    source_categories (domain -> (category, competitor group), from
+    stage2_seed.category_lookup) tags every cited and retrieved source.
     Now with business context injection for better grounding.
 
     Args:
@@ -2972,6 +2989,9 @@ async def run_rag_simulation(
                     "sandbox_citations": [],
                     "diagnosis_type": "content_gap",
                     "diagnosis_detail": "No content from any source was retrieved for this question.",
+                    "sandbox_citation_position": None,
+                    "cited_source_categories": [],
+                    "retrieved_source_categories": {},
                 })
                 continue
 
@@ -3231,6 +3251,12 @@ async def run_rag_simulation(
                 authority_source_citations=authority_source_citations,
                 final_chunks=final_chunks,
             )
+            source_tags = tag_rag_result(
+                answer=answer,
+                sandbox_url=sandbox_url,
+                retrieved_chunk_urls=[c.get("url", "") for c in final_chunks],
+                lookup=source_categories or {},
+            )
 
             # CRITICAL: Citation arrays are FINALIZED here and become the source of truth.
             # These arrays are persisted to sandbox_rag_results table and MUST be trusted for analytics.
@@ -3249,6 +3275,7 @@ async def run_rag_simulation(
                 "metrics": rag_metrics,  # Store the full metrics dict
                 "diagnosis_type": diagnosis["diagnosis_type"],
                 "diagnosis_detail": diagnosis["diagnosis_detail"],
+                **source_tags,  # sandbox_citation_position, cited/retrieved source categories
             })
             #lets prinf a log which will print the rag_metrics 
             logger.info(f"[rag_metrics] question_id={question_id} rag_metrics={rag_metrics}")
