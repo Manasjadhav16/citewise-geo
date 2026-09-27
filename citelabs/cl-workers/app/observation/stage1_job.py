@@ -396,6 +396,8 @@ async def run_stage1_job(
             evidence = await compress_query_sources(record["query"], inputs, total_budget=config.evidence_token_budget, **compression)
             evidence_by_key = {entry["key"]: ev for entry, ev in zip(in_budget, evidence)}
             crawl_errors = {entry["key"]: item["crawl_error"] for entry, item in zip(in_budget, inputs)}
+            # The crawled page's own title beats the grounding chunk's title (usually just the domain)
+            page_titles = {entry["key"]: item["title"] for entry, item in zip(in_budget, inputs)}
 
             sources = []
             for entry in record["pool"]:
@@ -407,7 +409,7 @@ async def run_stage1_job(
                         **entry,
                         "url": meta["url"],
                         "domain": meta["domain"],
-                        "title": meta["title"],
+                        "title": page_titles.get(entry["key"]) or meta["title"],
                         "category": cat.category if cat else "other",
                         "category_source": cat.category_source if cat else "fallback",
                         "llm_category": cat.llm_category if cat else None,

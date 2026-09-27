@@ -17,6 +17,9 @@ import {
   LineChart,
   Line,
 } from 'recharts';
+import Link from 'next/link';
+import { apiFetch } from '../lib/api';
+import { CategoryChip, ShareChart, StatTile, fmtNum, fmtPct } from '../components/twoStage';
 
 type SandboxPage = {
   url: string;
@@ -52,6 +55,8 @@ type SandboxRagResult = {
   sandboxCitations: string[];
   diagnosisType?: 'competitor_advantage' | 'content_gap' | null;
   diagnosisDetail?: string | null;
+  sandboxCitationPosition?: number | null;
+  citedSourceCategories?: { url: string; domain: string; category: string; competitor_group: string }[] | null;
   questionRef?: {
     type: string;
   };
@@ -64,6 +69,24 @@ type SandboxScores = {
   coverage?: number | null;
   competitorDominance?: number | null;
   recommendations: string[];
+  // Two-stage GEO metrics
+  responsesEvaluated?: number | null;
+  mentionRate?: number | null;
+  strictCitationRate?: number | null;
+  meanCitationPosition?: number | null;
+  medianCitationPosition?: number | null;
+  categoryBreakdown?: Record<string, number> | null;
+  competitorGroupBreakdown?: Record<string, number> | null;
+};
+
+type TwoStage = {
+  observation_id: string | null;
+  run_tag: 'before' | 'after' | null;
+  baseline_run_id: string | null;
+  seed_mode: 'stage1' | 'baseline' | null;
+  question_set: { q: string; type: string }[] | null;
+  source_pool: { url: string; source_category?: string; origin?: string }[] | null;
+  pool_counts: Record<string, any> | null;
 };
 
 
@@ -84,6 +107,7 @@ type SandboxResponse = {
   scores: SandboxScores | null;
   advanced_metrics?: AdvancedMetrics | null;
   recommendations: string[];
+  two_stage?: TwoStage | null;
 };
 
 const COLORS = ['#8b5cf6', '#3b82f6', '#ec4899', '#10b981', '#f59e0b'];
@@ -93,6 +117,25 @@ const RunDetails = () => {
   const { runId } = router.query;
   const [data, setData] = useState<SandboxResponse | null>(null);
   const [currentStep, setCurrentStep] = useState<string>('processing');
+  const [afterRunError, setAfterRunError] = useState<string | null>(null);
+  const [startingAfterRun, setStartingAfterRun] = useState(false);
+
+  // Two-stage GEO: re-measure the same questions and source pool after the website changes
+  const startAfterRun = async () => {
+    if (!data || !data.sandbox?.url) return;
+    setStartingAfterRun(true);
+    setAfterRunError(null);
+    try {
+      const { run_id } = await apiFetch<{ run_id: string }>('/api/sandbox/run', {
+        method: 'POST',
+        body: JSON.stringify({ url: data.sandbox.url, run_tag: 'after', baseline_run_id: data.run_id }),
+      });
+      router.push(`/${run_id}`);
+    } catch (err) {
+      setAfterRunError(err instanceof Error ? err.message : String(err));
+      setStartingAfterRun(false);
+    }
+  };
 
   // Redirect if runId is a reserved route like "chat"
   useEffect(() => {
@@ -427,6 +470,70 @@ const RunDetails = () => {
                 </section>
               )}
 
+              {/* Two-Stage GEO */}
+              {data.scores && (data.two_stage?.seed_mode || data.scores.strictCitationRate != null) && (
+                <section className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-gray-700 p-8 shadow-2xl space-y-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <h2 className="text-3xl font-bold mb-2">Two-Stage GEO</h2>
+                      <div className="flex flex-wrap gap-2 text-sm">
+                        {data.two_stage?.run_tag && (
+                          <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 uppercase text-xs font-semibold">
+                            {data.two_stage.run_tag}
+                          </span>
+                        )}
+                        {data.two_stage?.observation_id && (
+                          <Link href={`/observation/${data.two_stage.observation_id}`} className="text-blue-300 hover:underline">
+                            Seeded from real-world observation
+                          </Link>
+                        )}
+                        {data.two_stage?.baseline_run_id && (
+                          <Link href={`/${data.two_stage.baseline_run_id}`} className="text-blue-300 hover:underline">
+                            Baseline run
+                          </Link>
+                        )}
+                        {!data.two_stage?.seed_mode && <span className="text-gray-400">Unseeded run</span>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {data.two_stage?.run_tag === 'after' && data.two_stage.baseline_run_id && (
+                        <Link
+                          href={`/compare?before=${data.two_stage.baseline_run_id}&after=${data.run_id}`}
+                          className="px-5 py-2 bg-gradient-to-r from-green-600 to-emerald-600 rounded-lg font-semibold"
+                        >
+                          Compare with baseline
+                        </Link>
+                      )}
+                      {data.two_stage?.source_pool && data.two_stage.source_pool.length > 0 && (
+                        <button
+                          onClick={startAfterRun}
+                          disabled={startingAfterRun}
+                          className="px-5 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg font-semibold disabled:opacity-50"
+                          title="Re-crawl the pages and re-score with this run's exact questions and source pool"
+                        >
+                          {startingAfterRun ? 'Starting…' : 'Re-measure after website changes'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {afterRunError && <div className="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg">{afterRunError}</div>}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <StatTile label="Strict citation rate" value={fmtPct(data.scores.strictCitationRate)} hint="Answers citing your site as a source. The Citation Rate used in the GEO score also counts brand mentions." />
+                    <StatTile label="Mean citation position" value={fmtNum(data.scores.meanCitationPosition, 1)} hint="Your rank among cited domains, when cited (lower is better)" />
+                    <StatTile label="Median citation position" value={fmtNum(data.scores.medianCitationPosition, 1)} />
+                    <StatTile
+                      label="Source pool"
+                      value={data.two_stage?.source_pool?.length ?? data.competitors.length}
+                      hint={data.two_stage?.seed_mode === 'baseline' ? "Reused from the baseline run" : data.two_stage?.seed_mode === 'stage1' ? 'Stage 1 sources merged with discovery' : 'Discovered sources'}
+                    />
+                  </div>
+                  <div className="grid lg:grid-cols-2 gap-6">
+                    <ShareChart title="Citation share by competitor group" breakdown={data.scores.competitorGroupBreakdown} />
+                    <ShareChart title="AI visibility competition (share by category)" breakdown={data.scores.categoryBreakdown} />
+                  </div>
+                </section>
+              )}
+
               {/* Sandbox Page */}
               {data.sandbox && (
                 <section className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-gray-700 p-8 shadow-2xl">
@@ -550,6 +657,11 @@ const RunDetails = () => {
                                 {rag.diagnosisType === 'competitor_advantage' ? 'Competitor advantage' : 'Content gap'}
                               </span>
                             )}
+                            {rag.sandboxCitationPosition != null && rag.sandboxCitations.length > 0 && (
+                              <span className="text-xs px-3 py-1 rounded-full bg-green-500/20 text-green-300" title="Your rank among cited domains">
+                                #{rag.sandboxCitationPosition} cited
+                              </span>
+                            )}
                             <span className="text-xs px-3 py-1 rounded-full bg-blue-500/20 text-blue-300">
                               {rag.chunksUsed} chunks
                             </span>
@@ -560,6 +672,16 @@ const RunDetails = () => {
                           <p className="text-sm text-gray-400 mb-3">
                             <strong>Why:</strong> {rag.diagnosisDetail}
                           </p>
+                        )}
+                        {rag.citedSourceCategories && rag.citedSourceCategories.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-gray-400">
+                            <span>Cited:</span>
+                            {rag.citedSourceCategories.map((c) => (
+                              <span key={c.url} className="flex items-center gap-1" title={c.url}>
+                                {c.domain} <CategoryChip category={c.category} />
+                              </span>
+                            ))}
+                          </div>
                         )}
                         {(rag.sandboxCitations.length > 0 || rag.competitorCitations.length > 0) && (
                           <div className="text-xs text-gray-400 space-y-1">

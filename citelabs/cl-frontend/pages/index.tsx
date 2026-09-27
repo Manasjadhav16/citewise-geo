@@ -2,12 +2,41 @@ import { FormEvent, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import React from 'react';
+import { apiFetch } from '../lib/api';
 
 const Home = () => {
   const [url, setUrl] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+
+  // Two-stage GEO: Stage 1 real-world observation
+  const [obsUrl, setObsUrl] = useState('');
+  const [runsPerQuery, setRunsPerQuery] = useState('');
+  const [queryCount, setQueryCount] = useState('');
+  const [isObserving, setIsObserving] = useState(false);
+  const [obsError, setObsError] = useState<string | null>(null);
+
+  const handleObserve = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setObsError(null);
+    setIsObserving(true);
+    try {
+      const { observation_id } = await apiFetch<{ observation_id: string }>('/api/observation/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          url: obsUrl.trim(),
+          // Blank fields fall back to the server's STAGE1_* defaults
+          runs_per_query: runsPerQuery ? Number(runsPerQuery) : undefined,
+          query_count: queryCount ? Number(queryCount) : undefined,
+        }),
+      });
+      router.push(`/observation/${observation_id}`);
+    } catch (err) {
+      setObsError(err instanceof Error ? err.message : 'Unexpected error occurred.');
+      setIsObserving(false);
+    }
+  };
 
   const handleAnalyze = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -117,6 +146,56 @@ const Home = () => {
                     </div>
                   )}
                 </div>
+              </form>
+            </section>
+
+            {/* Two-Stage GEO: Stage 1 */}
+            <section className="bg-gray-800/50 backdrop-blur-lg rounded-2xl border border-gray-700 p-8 md:p-12 shadow-2xl">
+              <h2 className="text-2xl md:text-3xl font-semibold mb-2 text-center">Two-Stage GEO: Real-World Observation</h2>
+              <p className="text-gray-400 text-sm text-center mb-6 max-w-2xl mx-auto">
+                Stage 1 asks representative queries repeatedly through Gemini with Google Search grounding and records
+                which sources it cites. That source pool then seeds the controlled GEO score. This is an approximate
+                proxy for Google AI Overview citations, not real AI Overview data.
+              </p>
+              <form className="space-y-4" onSubmit={handleObserve}>
+                <input
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900/50 px-4 py-3 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  placeholder="https://example.com/page"
+                  value={obsUrl}
+                  onChange={(event) => setObsUrl(event.target.value)}
+                  type="url"
+                  required
+                  disabled={isObserving}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="flex flex-col gap-2 text-sm text-gray-300">
+                    Runs per query
+                    <input
+                      className="rounded-lg border border-gray-600 bg-gray-900/50 px-3 py-2 text-white placeholder-gray-500"
+                      type="number" min={1} placeholder="Server default (15)"
+                      value={runsPerQuery} onChange={(e) => setRunsPerQuery(e.target.value)} disabled={isObserving}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm text-gray-300">
+                    Queries
+                    <input
+                      className="rounded-lg border border-gray-600 bg-gray-900/50 px-3 py-2 text-white placeholder-gray-500"
+                      type="number" min={1} placeholder="Server default (10)"
+                      value={queryCount} onChange={(e) => setQueryCount(e.target.value)} disabled={isObserving}
+                    />
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500">Each run is one rate-limited grounded model call; the defaults (10 × 15) take a long time on a free-tier key.</p>
+                <div className="flex justify-center">
+                  <button
+                    className="px-8 py-3 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 rounded-lg font-semibold disabled:opacity-50"
+                    type="submit"
+                    disabled={isObserving}
+                  >
+                    {isObserving ? 'Starting…' : 'Start Real-World Observation'}
+                  </button>
+                </div>
+                {obsError && <div className="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg">{obsError}</div>}
               </form>
             </section>
 
