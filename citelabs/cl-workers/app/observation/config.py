@@ -6,6 +6,17 @@ from typing import Any, Mapping, Optional, Tuple
 from ..geo_metrics import load_source_categories
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be true or false, got {value!r}")
+
+
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name, "").strip()
     return int(value) if value else default
@@ -29,6 +40,9 @@ class Stage1Config:
     serpapi_gl: str = "in"
     serpapi_hl: str = "en"
     serpapi_device: str = "desktop"
+    # Observation-only runs: skip crawling cited pages and evidence extraction (saves LLM quota);
+    # LLM categorisation still runs
+    skip_evidence: bool = False
     source_categories: Tuple[str, ...] = load_source_categories("")
 
     @property
@@ -58,6 +72,7 @@ class Stage1Config:
             serpapi_gl=os.getenv("STAGE1_SERPAPI_GL", cls.serpapi_gl),
             serpapi_hl=os.getenv("STAGE1_SERPAPI_HL", cls.serpapi_hl),
             serpapi_device=os.getenv("STAGE1_SERPAPI_DEVICE", cls.serpapi_device),
+            skip_evidence=_env_bool("STAGE1_SKIP_EVIDENCE", cls.skip_evidence),
             source_categories=load_source_categories(),
         )
         # Per-run overrides from the API request (e.g. a smaller N for a quick run)

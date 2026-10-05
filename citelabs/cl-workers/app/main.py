@@ -214,6 +214,7 @@ class Stage1StartRequest(BaseModel):
     serpapi_gl: Optional[str] = None  # overrides STAGE1_SERPAPI_GL (serpapi_aio only)
     serpapi_hl: Optional[str] = None  # overrides STAGE1_SERPAPI_HL
     serpapi_device: Optional[str] = None  # overrides STAGE1_SERPAPI_DEVICE
+    skip_evidence: Optional[bool] = None  # overrides STAGE1_SKIP_EVIDENCE: observation-only run
 
 
 @app.post("/stage1/start")
@@ -236,6 +237,7 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
         "serpapi_gl": payload.serpapi_gl,
         "serpapi_hl": payload.serpapi_hl,
         "serpapi_device": payload.serpapi_device,
+        "skip_evidence": payload.skip_evidence,
     }
     try:
         config = Stage1Config.from_env(overrides)  # reject invalid config before starting

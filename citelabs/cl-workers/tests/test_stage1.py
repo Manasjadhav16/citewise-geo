@@ -399,3 +399,85 @@ class TestMentionExclAbsence:
 
     def test_no_answered_runs_is_no_data(self):
         assert aggregate_query_runs([], "razorpay.com", TERMS, False)["metrics"]["mention_rate_excl_absence"] is None
+
+
+# ---------- skip_evidence (observation-only runs) ----------
+
+class TestSkipEvidence:
+    def test_config_env_and_override(self, monkeypatch):
+        assert Stage1Config.from_env().skip_evidence is False
+        monkeypatch.setenv("STAGE1_SKIP_EVIDENCE", "true")
+        assert Stage1Config.from_env().skip_evidence is True
+        assert Stage1Config.from_env({"skip_evidence": False}).skip_evidence is False
+        monkeypatch.setenv("STAGE1_SKIP_EVIDENCE", "maybe")
+        with pytest.raises(ValueError, match="STAGE1_SKIP_EVIDENCE"):
+            Stage1Config.from_env()
+
+    @staticmethod
+    def _run_job(monkeypatch, skip):
+        from app.observation import stage1_job
+        from app.observation.categorize import categorize_domains
+        from app.observation.evidence import EvidenceResult
+        from app.observation.fetchers import OUTCOME_ANSWER, Observation, ObservedCitation
+
+        calls = {"categorize": 0, "crawl": 0, "compress": 0, "posted": None}
+
+        class Fetcher:
+            name, data_disclaimer, reports_activation, settings = "fake", "fake data", False, {}
+
+            async def preflight(self, planned):
+                return {}
+
+            async def observe(self, query):
+                cites = [ObservedCitation(f"https://s{i}.com/p", f"https://s{i}.com/p", f"s{i}.com", None, i + 1, True, True) for i in range(3)]
+                return Observation(answer_text="Acme is great.", model="m", citations=cites, outcome=OUTCOME_ANSWER)
+
+        async def context(url):
+            return {"page_title": "Acme", "page_text": "Acme page text", "domain_summary": None,
+                    "page_intent": "x", "brand_name": "Acme", "business_category": "y"}
+
+        class NoLLM:
+            async def chat(self, *a, **k):
+                return "{}"
+
+        async def categorize(domains, **kwargs):
+            calls["categorize"] += 1
+            return await categorize_domains(domains, llm=NoLLM(), **kwargs)
+
+        async def crawl(urls, concurrency):
+            calls["crawl"] += 1
+            return {u: {"page_text": "text", "title": "T", "crawl_error": None} for u in urls}
+
+        async def compress(query, sources, **kwargs):
+            calls["compress"] += 1
+            return [EvidenceResult(s["url"], "- fact", 100, 3, True) for s in sources]
+
+        async def quiet(*args, **kwargs):
+            return None
+
+        async def post(path, payload, timeout):
+            if path.endswith("/result"):
+                calls["posted"] = payload
+
+        for name, value in [("_build_context", context), ("categorize_domains", categorize), ("_crawl_sources", crawl),
+                            ("compress_query_sources", compress), ("_send_progress", quiet), ("_post", post)]:
+            monkeypatch.setattr(stage1_job, name, value)
+        result = asyncio.run(stage1_job.run_stage1_job("obs", "https://acme.in", ["q"], {"runs_per_query": 2, "skip_evidence": skip}, fetcher=Fetcher()))
+        return result, calls
+
+    def test_skip_evidence_skips_crawl_and_evidence_but_keeps_categorisation(self, monkeypatch):
+        result, calls = self._run_job(monkeypatch, skip=True)
+        assert result["status"] == "completed" and result["evidence_skipped"] is True
+        assert calls == {"categorize": 1, "crawl": 0, "compress": 0, "posted": result}
+        sources = result["queries"][0]["sources"]
+        assert len(sources) == 3
+        assert all(s["evidence"] is None and s["evidence_error"] is None and s["crawl_error"] is None for s in sources)
+        assert not any(s["over_source_cap"] for s in sources)
+        assert result["queries"][0]["target_evidence"] is None
+        assert result["metrics"]["mention_rate"] == 100.0  # observation metrics unaffected
+
+    def test_evidence_runs_by_default(self, monkeypatch):
+        result, calls = self._run_job(monkeypatch, skip=False)
+        assert result["evidence_skipped"] is False
+        assert calls["crawl"] == 1 and calls["compress"] >= 1
+        assert all(s["evidence"] == "- fact" for s in result["queries"][0]["sources"])

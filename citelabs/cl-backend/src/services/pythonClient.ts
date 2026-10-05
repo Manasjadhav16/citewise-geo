@@ -266,6 +266,7 @@ export class Worker {
     serpapi_gl?: string;
     serpapi_hl?: string;
     serpapi_device?: string;
+    skip_evidence?: boolean;
   }): Promise<void> {
     const response = await fetch(`${this.baseUrl}/stage1/start`, {
       method: 'POST',

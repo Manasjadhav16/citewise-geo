@@ -79,6 +79,7 @@ type Observation = {
   categoryBreakdown: Record<string, number> | null;
   competitorGroupBreakdown: Record<string, number> | null;
   fetcher?: string | null;
+  evidenceSkipped?: boolean | null;
   fetcherSettings?: { gl?: string; hl?: string; device?: string } | null;
   ratesBasedOnRuns?: number | null;
   aioRuns?: number | null;
@@ -103,7 +104,7 @@ const STEP_LABELS: Record<string, string> = {
   failed: 'Failed',
 };
 
-function SourceRow({ source }: { source: ObservationSource }) {
+function SourceRow({ source, evidenceSkipped }: { source: ObservationSource; evidenceSkipped: boolean }) {
   const [open, setOpen] = useState(false);
   const problem = source.crawlError || source.evidenceError;
   return (
@@ -128,7 +129,7 @@ function SourceRow({ source }: { source: ObservationSource }) {
           </button>
         ) : (
           <span className="text-xs text-gray-500" title={problem || undefined}>
-            {source.overSourceCap ? 'Over source cap' : problem ? 'Not extracted' : source.hasRelevantEvidence === false ? 'No relevant evidence' : ''}
+            {evidenceSkipped ? 'Evidence skipped' : source.overSourceCap ? 'Over source cap' : problem ? 'Not extracted' : source.hasRelevantEvidence === false ? 'No relevant evidence' : ''}
           </span>
         )}
       </div>
@@ -248,6 +249,12 @@ const ObservationPage = () => {
 
           {observation?.status === 'completed' && (
             <>
+              {observation.evidenceSkipped && (
+                <div className="bg-gray-800/60 border border-gray-600 text-gray-300 px-4 py-3 rounded-xl text-sm">
+                  <strong>Evidence extraction was skipped</strong> for this run (observation-only, <code>skip_evidence</code>): cited pages were
+                  not crawled and no evidence was extracted. Sources were still categorised.
+                </div>
+              )}
               <section className="bg-gray-800/50 rounded-2xl border border-gray-700 p-8 space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h2 className="text-3xl font-bold">Summary</h2>
@@ -322,7 +329,7 @@ const ObservationPage = () => {
                   <h3 className="text-sm uppercase tracking-wide text-gray-400 mb-2">Union source pool ({q.sources.length})</h3>
                   <div>
                     {q.sources.map((s) => (
-                      <SourceRow key={s.id} source={s} />
+                      <SourceRow key={s.id} source={s} evidenceSkipped={Boolean(observation.evidenceSkipped)} />
                     ))}
                   </div>
                 </section>

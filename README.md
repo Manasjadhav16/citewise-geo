@@ -326,6 +326,7 @@ Add `"dry_run": true` to a `/api/sandbox/run` request to validate it and see the
 | `STAGE1_COMPRESSION_BATCH_SIZE` | `5` | Evidence calls in flight at once |
 | `STAGE1_GROUNDING_MODEL` | `gemini-2.5-flash` | Model for grounded observations (never rotated mid-run) |
 | `STAGE1_FETCHER` | `gemini_grounding` | Observation fetcher: `gemini_grounding` (proxy) or `serpapi_aio` (Google AI Overviews via SerpApi) |
+| `STAGE1_SKIP_EVIDENCE` | `false` | Observation-only runs: skip crawling cited pages and evidence extraction (saves LLM quota); LLM categorisation still runs. Also `"skip_evidence": true` per request. Shown on the Stage 1 page and in the export |
 | `STAGE1_SERPAPI_GL` / `_HL` / `_DEVICE` | `in` / `en` / `desktop` | `serpapi_aio` country, language and device, fixed per run (needs `SERPAPI_KEY`) |
 | `SOURCE_CATEGORIES` | built-in list | Comma-separated taxonomy override |
 | `STAGE2_MAX_SOURCES` | `40` | Maximum merged source pool for seeded Stage 2 runs |

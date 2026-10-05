@@ -518,6 +518,7 @@ async def run_stage1_job(
                 "fetcher": fetcher.name,
                 "data_disclaimer": fetcher.data_disclaimer,
                 "fetcher_settings": fetcher.settings,
+                "evidence_skipped": config.skip_evidence,
                 "config": {k: v for k, v in asdict(config).items()},
             }
         )
@@ -599,21 +600,27 @@ async def run_stage1_job(
         # was already crawled for context; other pages on the target's site are crawled.
         sandbox_key = canonical_url(url)
         crawlable: List[str] = []
-        for record in query_records:
+        # Crawled text is only used for evidence: nothing to crawl when evidence is skipped
+        for record in ([] if config.skip_evidence else query_records):
             for entry in record["pool"][: config.max_sources_per_query]:
                 page_url = pool_meta[entry["key"]]["url"]
                 if page_url and page_url != sandbox_key and page_url not in crawlable:
                     crawlable.append(page_url)
-        await _send_progress(observation_id, "crawling_sources", "started", {"pages": len(crawlable)})
-        pages = await _crawl_sources(crawlable, config.crawl_concurrency)
+        if config.skip_evidence:
+            await _send_progress(observation_id, "crawling_sources", "skipped", {"reason": "skip_evidence"})
+        else:
+            await _send_progress(observation_id, "crawling_sources", "started", {"pages": len(crawlable)})
+        pages = await _crawl_sources(crawlable, config.crawl_concurrency) if crawlable else {}
         target_page = {"page_text": context["page_text"] or None, "title": context["page_title"], "crawl_error": None}
         pages[sandbox_key] = target_page
         unresolved = {"page_text": None, "title": None, "crawl_error": "source URL could not be resolved"}
-        await _send_progress(observation_id, "crawling_sources", "success", {"crawled": sum(1 for p in pages.values() if p["page_text"])})
+        if not config.skip_evidence:
+            await _send_progress(observation_id, "crawling_sources", "success", {"crawled": sum(1 for p in pages.values() if p["page_text"])})
 
         # Evidence per (query, source), plus the sandbox page for each query. One
         # rolling window of compression calls is shared across all queries.
-        await _send_progress(observation_id, "evidence_compression", "started")
+        # skip_evidence (observation-only runs) leaves evidence empty to save LLM quota.
+        await _send_progress(observation_id, "evidence_compression", "skipped" if config.skip_evidence else "started")
         window = asyncio.Semaphore(config.compression_batch_size)
         compression = dict(
             per_source_cap=config.per_source_token_cap,
@@ -625,19 +632,23 @@ async def run_stage1_job(
 
         async def compress_record(record: Dict[str, Any]) -> None:
             in_budget = record["pool"][: config.max_sources_per_query]
-            inputs = []
-            for entry in in_budget:
-                meta = pool_meta[entry["key"]]
-                page = pages.get(meta["url"] or "", unresolved)
-                inputs.append({"url": meta["url"] or meta["domain"], "title": page.get("title") or meta["title"], "page_text": page["page_text"], "crawl_error": page["crawl_error"]})
-            evidence = await compress_query_sources(record["query"], inputs, total_budget=config.evidence_token_budget, **compression)
-            evidence_by_key = {entry["key"]: ev for entry, ev in zip(in_budget, evidence)}
-            crawl_errors = {entry["key"]: item["crawl_error"] for entry, item in zip(in_budget, inputs)}
-            # The crawled page's own title beats the grounding chunk's title (usually just the domain)
-            page_titles = {entry["key"]: item["title"] for entry, item in zip(in_budget, inputs)}
+            evidence_by_key: Dict[str, Any] = {}
+            crawl_errors: Dict[str, Optional[str]] = {}
+            page_titles: Dict[str, Optional[str]] = {}
+            if not config.skip_evidence:
+                inputs = []
+                for entry in in_budget:
+                    meta = pool_meta[entry["key"]]
+                    page = pages.get(meta["url"] or "", unresolved)
+                    inputs.append({"url": meta["url"] or meta["domain"], "title": page.get("title") or meta["title"], "page_text": page["page_text"], "crawl_error": page["crawl_error"]})
+                evidence = await compress_query_sources(record["query"], inputs, total_budget=config.evidence_token_budget, **compression)
+                evidence_by_key = {entry["key"]: ev for entry, ev in zip(in_budget, evidence)}
+                crawl_errors = {entry["key"]: item["crawl_error"] for entry, item in zip(in_budget, inputs)}
+                # The crawled page's own title beats the grounding chunk's title (usually just the domain)
+                page_titles = {entry["key"]: item["title"] for entry, item in zip(in_budget, inputs)}
 
             sources = []
-            for entry in record["pool"]:
+            for rank, entry in enumerate(record["pool"]):
                 meta = pool_meta[entry["key"]]
                 cat = categories.get(meta["domain"])
                 ev = evidence_by_key.get(entry["key"])
@@ -652,7 +663,7 @@ async def run_stage1_job(
                         "llm_category": cat.llm_category if cat else None,
                         "heuristic_category": cat.heuristic_category if cat else None,
                         "competitor_group": cat.competitor_group if cat else "ai_visibility",
-                        "over_source_cap": ev is None,
+                        "over_source_cap": rank >= config.max_sources_per_query,
                         "crawl_error": crawl_errors.get(entry["key"]),
                         "evidence": ev.evidence if ev else None,
                         "evidence_token_budget": ev.token_budget if ev else None,
@@ -668,7 +679,7 @@ async def run_stage1_job(
             # The sandbox page's own evidence for this query (input for gap analysis),
             # compressed even when it was never cited
             record["target_evidence"] = None
-            if not any(s["url"] == sandbox_key for s in sources) and target_page["page_text"]:
+            if not config.skip_evidence and not any(s["url"] == sandbox_key for s in sources) and target_page["page_text"]:
                 [own] = await compress_query_sources(
                     record["query"],
                     [{"url": url, "title": context["page_title"], "page_text": target_page["page_text"]}],
@@ -679,7 +690,8 @@ async def run_stage1_job(
                 record["target_evidence"] = asdict(own)
 
         await asyncio.gather(*(compress_record(record) for record in query_records))
-        await _send_progress(observation_id, "evidence_compression", "success")
+        if not config.skip_evidence:
+            await _send_progress(observation_id, "evidence_compression", "success")
 
         # Run-level aggregates
         all_visibilities = [v for r in query_records for v in r.pop("_visibilities")]

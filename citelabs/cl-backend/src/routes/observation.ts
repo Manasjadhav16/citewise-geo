@@ -26,6 +26,7 @@ type ObservationRunBody = {
   serpapi_gl?: string;
   serpapi_hl?: string;
   serpapi_device?: 'desktop' | 'mobile' | 'tablet';
+  skip_evidence?: boolean; // observation-only run: no crawling or evidence extraction
 };
 
 type ProgressBody = {
@@ -127,6 +128,7 @@ type WorkerResult = {
   fetcher?: string;
   data_disclaimer?: string;
   fetcher_settings?: Record<string, unknown>;
+  evidence_skipped?: boolean;
   preflight?: Record<string, unknown>;
   config?: Record<string, unknown>;
   context?: Record<string, unknown>;
@@ -154,7 +156,7 @@ export default async function observationRoutes(app: FastifyInstance) {
   // ==========================================
   app.post('/api/observation/run', async (request, reply) => {
     const body = (request.body || {}) as ObservationRunBody;
-    const { url, queries, runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device } = body;
+    const { url, queries, runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device, skip_evidence } = body;
 
     try {
       new URL(url || '');
@@ -163,6 +165,9 @@ export default async function observationRoutes(app: FastifyInstance) {
     }
     if (queries !== undefined && (!Array.isArray(queries) || queries.some((q) => typeof q !== 'string'))) {
       return reply.status(400).send({ error: 'queries must be an array of strings' });
+    }
+    if (skip_evidence !== undefined && typeof skip_evidence !== 'boolean') {
+      return reply.status(400).send({ error: 'skip_evidence must be true or false' });
     }
     if (!isPositiveInt(runs_per_query) || !isPositiveInt(query_count)) {
       return reply.status(400).send({ error: 'runs_per_query and query_count must be positive integers' });
@@ -175,7 +180,7 @@ export default async function observationRoutes(app: FastifyInstance) {
         sandboxUrl: url!,
         status: 'pending',
         requestedQueries: queries ?? [],
-        config: toJson({ runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device }),
+        config: toJson({ runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device, skip_evidence }),
       },
     });
 
@@ -191,6 +196,7 @@ export default async function observationRoutes(app: FastifyInstance) {
         serpapi_gl,
         serpapi_hl,
         serpapi_device,
+        skip_evidence,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -386,6 +392,7 @@ export default async function observationRoutes(app: FastifyInstance) {
           meanSourceSetStability: m.mean_source_set_stability ?? null,
           meanDomainSetStability: m.mean_domain_set_stability ?? null,
           fetcherSettings: toJson(result.fetcher_settings),
+          evidenceSkipped: result.evidence_skipped ?? null,
           preflight: toJson(result.preflight),
           creditsUsed: m.credits_used ?? null,
           ratesBasedOnRuns: m.rates_based_on_runs ?? null,

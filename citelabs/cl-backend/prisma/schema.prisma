@@ -331,6 +331,7 @@ model ObservationRun {
   aioActivationRate        Float? @map("aio_activation_rate")
   overallCitationRate      Float? @map("overall_citation_rate") // cited / all successful runs
   parseErrors              Int?   @map("parse_errors")
+  evidenceSkipped          Boolean? @map("evidence_skipped") // observation-only run: no crawling or evidence extraction
   inlineLinkedRuns         Int?   @map("inline_linked_runs") // secondary: answers linking the target inline (not citations)
   inlineLinkRate           Float? @map("inline_link_rate")
 
