@@ -64,6 +64,9 @@ type WorkerRun = {
   answer_text?: string;
   search_queries?: string[];
   target?: { mentioned: boolean; cited: boolean; citation_position: number | null } | null;
+  mentioned_excl_absence?: boolean | null;
+  mention_sentences?: string[] | null;
+  absence_sentences?: string[] | null;
   citations: WorkerCitation[];
 };
 
@@ -103,6 +106,7 @@ type WorkerQuery = {
     source_set_stability: number | null;
     domain_set_stability: number | null;
     mention_rate: number | null; // null: no successful observations
+    mention_rate_excl_absence?: number | null;
     citation_rate: number | null;
     mean_citation_position: number | null;
     median_citation_position: number | null;
@@ -267,6 +271,7 @@ export default async function observationRoutes(app: FastifyInstance) {
         sourceSetStability: q.metrics.source_set_stability,
         domainSetStability: q.metrics.domain_set_stability,
         mentionRate: q.metrics.mention_rate,
+        mentionRateExclAbsence: q.metrics.mention_rate_excl_absence ?? null,
         citationRate: q.metrics.citation_rate,
         meanCitationPosition: q.metrics.mean_citation_position,
         medianCitationPosition: q.metrics.median_citation_position,
@@ -297,6 +302,9 @@ export default async function observationRoutes(app: FastifyInstance) {
           targetMentioned: r.target?.mentioned ?? null,
           targetCited: r.target?.cited ?? null,
           targetPosition: r.target?.citation_position ?? null,
+          targetMentionedExclAbsence: r.mentioned_excl_absence ?? null,
+          mentionSentences: toJson(r.mention_sentences),
+          absenceSentences: toJson(r.absence_sentences),
           outcome: r.outcome ?? null,
           creditsUsed: r.credits_used ?? null,
           fetchMeta: toJson(r.fetch_meta),
@@ -370,6 +378,7 @@ export default async function observationRoutes(app: FastifyInstance) {
           uniqueSources: m.unique_sources ?? null,
           uniqueDomains: m.unique_domains ?? null,
           mentionRate: m.mention_rate ?? null,
+          mentionRateExclAbsence: m.mention_rate_excl_absence ?? null,
           citationRate: m.citation_rate ?? null,
           meanCitationPosition: m.mean_citation_position ?? null,
           medianCitationPosition: m.median_citation_position ?? null,
@@ -425,7 +434,7 @@ export default async function observationRoutes(app: FastifyInstance) {
               orderBy: { runIndex: 'asc' },
               ...(includeRaw
                 ? { include: { citations: { orderBy: { position: 'asc' } } } }
-                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true } }),
+                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, targetMentionedExclAbsence: true, mentionSentences: true, absenceSentences: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true } }),
             },
           },
         },

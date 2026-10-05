@@ -312,6 +312,7 @@ model ObservationRun {
   uniqueSources            Int?   @map("unique_sources")
   uniqueDomains            Int?   @map("unique_domains")
   mentionRate              Float? @map("mention_rate")
+  mentionRateExclAbsence   Float? @map("mention_rate_excl_absence") // mentions excluding absence-of-information statements
   citationRate             Float? @map("citation_rate")
   meanCitationPosition     Float? @map("mean_citation_position")
   medianCitationPosition   Float? @map("median_citation_position")
@@ -354,6 +355,7 @@ model ObservationQuery {
   sourceSetStability     Float? @map("source_set_stability") // mean pairwise Jaccard, URLs
   domainSetStability     Float? @map("domain_set_stability") // mean pairwise Jaccard, domains
   mentionRate            Float? @map("mention_rate")
+  mentionRateExclAbsence Float? @map("mention_rate_excl_absence")
   citationRate           Float? @map("citation_rate")
   meanCitationPosition   Float? @map("mean_citation_position")
   medianCitationPosition Float? @map("median_citation_position")
@@ -388,6 +390,9 @@ model ObservationResponse {
   answerText      String?  @map("answer_text")
   searchQueries   String[] @map("search_queries")
   targetMentioned Boolean? @map("target_mentioned")
+  targetMentionedExclAbsence Boolean? @map("target_mentioned_excl_absence")
+  mentionSentences           Json?    @map("mention_sentences") // brand-term sentences counted as mentions
+  absenceSentences           Json?    @map("absence_sentences") // brand-term sentences that are absence statements
   targetCited     Boolean? @map("target_cited")
   targetPosition  Int?     @map("target_position")
   outcome         String? // answer | no_aio | error

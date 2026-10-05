@@ -247,7 +247,12 @@ Selected with `STAGE1_FETCHER`, or per request with `"fetcher"` in `POST /api/ob
 
 **Known limitation (tables):** SerpApi sometimes returns table rows with fewer cells than the header; the dropped cells appear to be ones that were links. Responses with such a table are flagged (`ragged_table`). A brand that appears only in a dropped cell is not in the answer text, so **the mention rate can undercount**.
 
-**How "mentioned" is decided (Stage 1, both fetchers):** a case-insensitive, whole-word string match of the brand name (from intent extraction) or the target's domain against the answer text (`detect_visibility` in `observation/stage1_job.py`). No entity model is involved, and negation is not handled: "there is no mention of Razorpay" counts as a mention. "Cited" is separate: the target's domain is among the answer's citations.
+**How "mentioned" is decided (Stage 1, both fetchers):** two fields are stored per response.
+
+- `mentioned`: a case-insensitive, whole-word string match of the brand name (from intent extraction) or the target's domain against the answer text (`detect_visibility` in `observation/stage1_job.py`). No entity model is involved, and negation is not handled: "there is no mention of Razorpay" counts as a mention.
+- `mentioned_excl_absence`: the same match, applied sentence by sentence (split at `.`, `!` or `?` followed by whitespace, and at line breaks). A sentence containing a brand term is an *absence-of-information statement* if it matches one of `ABSENCE_PATTERNS` ("no mention of", "does not mention", "not mentioned", "no information about/on/regarding", "does not contain (any) information", "not enough information", "cannot answer/find", including contracted forms). The brand counts as mentioned only if at least one brand-term sentence is not an absence statement. Ordinary negation is still a mention ("Razorpay does not charge setup fees"). The brand-term sentences are stored per response (`mention_sentences`, `absence_sentences`) for manual checking. Limitation: a sentence that names the brand *and* says something else lacks information (e.g. "There is no information about fees, but Razorpay is popular") is treated as an absence statement. Mention rates for both fields are over the same runs. Stage 2 scoring is unaffected.
+
+"Cited" is separate: the target's domain is among the answer's citations.
 
 ### Stage 2: Controlled Generative Environment
 

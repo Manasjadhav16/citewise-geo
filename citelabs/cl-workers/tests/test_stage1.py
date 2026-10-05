@@ -23,6 +23,7 @@ from app.observation.evidence import (
 )
 from app.observation.fetchers import build_citations, domain_from_title, is_utility_result
 from app.observation.stage1_job import (
+    aggregate_query_runs,
     brand_terms,
     detect_visibility,
     query_source_metrics,
@@ -287,3 +288,114 @@ class TestConfig:
         monkeypatch.setenv("STAGE1_MIN_SOURCE_TOKENS", "5000")
         with pytest.raises(ValueError):
             Stage1Config.from_env()
+
+
+# ---------- mentions excluding absence-of-information statements ----------
+
+from app.observation.stage1_job import detect_mentions, split_sentences  # noqa: E402
+
+TERMS = ["Razorpay", "razorpay.com"]
+
+
+class TestMentionExclAbsence:
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "The provided context does not contain information about Razorpay.",
+            "The context doesn't contain any information on Razorpay's pricing.",
+            "There is no mention of Razorpay in the sources.",
+            "The sources do not mention Razorpay.",
+            "The answer doesn’t mention Razorpay at all.",  # curly apostrophe
+            "Razorpay is not mentioned in the retrieved pages.",
+            "There is no information about Razorpay settlement times.",
+            "No information regarding razorpay.com was found.",
+            "There is not enough information to compare Razorpay with PayU.",
+            "I cannot find details on Razorpay's fees.",
+            "I can't answer whether Razorpay supports RuPay credit cards.",
+        ],
+    )
+    def test_absence_statements_are_not_mentions(self, sentence):
+        check = detect_mentions(sentence, TERMS)
+        assert check.mentioned is True  # the existing string match still fires
+        assert check.mentioned_excl_absence is False
+        assert check.absence_sentences == [sentence] and check.mention_sentences == []
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Razorpay does not charge setup fees.",  # ordinary negation: a real mention
+            "Razorpay isn't the cheapest option for international cards.",
+            "Unlike Razorpay, PayU does not offer instant settlements.",
+            "Razorpay never charges annual maintenance fees.",
+            "Razorpay is mentioned by most reviewers as the top choice.",
+            "Payment Gateway | Best For\nRazorpay | Full-stack tech & SaaS",  # table row line
+        ],
+    )
+    def test_real_mentions_count(self, sentence):
+        check = detect_mentions(sentence, TERMS)
+        assert check.mentioned is True and check.mentioned_excl_absence is True
+        assert check.absence_sentences == []
+
+    def test_mixed_answer_keeps_both_lists(self):
+        text = (
+            "The context does not contain information about Razorpay's settlement times. "
+            "However, Razorpay does not charge setup fees. Cashfree is also popular."
+        )
+        check = detect_mentions(text, TERMS)
+        assert check.mentioned_excl_absence is True
+        assert check.absence_sentences == ["The context does not contain information about Razorpay's settlement times."]
+        assert check.mention_sentences == ["However, Razorpay does not charge setup fees."]
+
+    def test_only_absence_sentences(self):
+        text = "No mention of Razorpay here. Cashfree and PayU are covered instead."
+        check = detect_mentions(text, TERMS)
+        assert (check.mentioned, check.mentioned_excl_absence) == (True, False)
+        assert check.mention_sentences == []
+
+    def test_absence_statement_about_another_brand_is_ignored(self):
+        # Absence wording without a brand term is not a brand sentence at all
+        text = "There is no information about PayU. Razorpay offers UPI."
+        check = detect_mentions(text, TERMS)
+        assert check.absence_sentences == [] and check.mention_sentences == ["Razorpay offers UPI."]
+
+    def test_no_brand(self):
+        check = detect_mentions("Cashfree and PayU are popular. There is no mention of fees.", TERMS)
+        assert (check.mentioned, check.mentioned_excl_absence, check.mention_sentences, check.absence_sentences) == (False, False, [], [])
+
+    def test_whole_word_rules_match_detect_visibility(self):
+        samples = [
+            "Razorpayments is a different company.",
+            "Try RAZORPAY today.",
+            "Visit razorpay.com for details.",
+            "Use app.razorpay.com to log in.",
+            "There is no mention of Razorpay.",
+            "Razorpay-backed merchants grew.",
+        ]
+        for text in samples:
+            assert detect_mentions(text, TERMS).mentioned == detect_visibility(text, [], "razorpay.com", TERMS).mentioned, text
+
+    def test_split_sentences(self):
+        assert split_sentences("One. Two? Three!\nFour | five\n\nSix") == ["One.", "Two?", "Three!", "Four | five", "Six"]
+
+    def test_rates_over_answered_runs(self):
+        from app.observation.fetchers import OUTCOME_ANSWER, Observation, ObservedCitation
+
+        def run(text):
+            cite = ObservedCitation("https://a.com", "https://a.com", "a.com", None, 1, True, True)
+            return {"run_index": 0, "ok": True, "observation": Observation(answer_text=text, model="m", citations=[cite], outcome=OUTCOME_ANSWER)}
+
+        agg = aggregate_query_runs(
+            [run("Razorpay does not charge setup fees."), run("There is no mention of Razorpay."), run("Only Cashfree.")],
+            "razorpay.com", TERMS, reports_activation=False,
+        )
+        m = agg["metrics"]
+        assert m["mention_rate"] == pytest.approx(200 / 3)  # unchanged string match
+        assert m["mention_rate_excl_absence"] == pytest.approx(100 / 3)
+        stored = agg["serialized"]
+        assert [r["mentioned_excl_absence"] for r in stored] == [True, False, False]
+        assert stored[1]["absence_sentences"] == ["There is no mention of Razorpay."]
+        assert stored[0]["mention_sentences"] == ["Razorpay does not charge setup fees."]
+        assert [r["target"]["mentioned"] for r in stored] == [True, True, False]
+
+    def test_no_answered_runs_is_no_data(self):
+        assert aggregate_query_runs([], "razorpay.com", TERMS, False)["metrics"]["mention_rate_excl_absence"] is None

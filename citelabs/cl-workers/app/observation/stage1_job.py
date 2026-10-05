@@ -23,7 +23,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -111,6 +111,66 @@ def detect_visibility(answer_text: str, ordered_domains: Sequence[str], target_d
     return ResponseVisibility(mentioned=mentioned, cited=position is not None, citation_position=position)
 
 
+# Absence-of-information statements: a sentence that names the brand only to say the
+# answer has no information about it is not a real mention. Deliberately narrow:
+# ordinary negation ("Razorpay does not charge setup fees") is still a mention.
+ABSENCE_PATTERNS: Tuple[str, ...] = (
+    r"\bno mention of\b",
+    r"\b(?:does|do|did) not mention\b",
+    r"\b(?:doesn't|don't|didn't) mention\b",
+    r"\bnot mentioned\b",
+    r"\bno information (?:about|on|regarding)\b",
+    r"\b(?:does|do) not contain (?:any )?information\b",
+    r"\b(?:doesn't|don't) contain (?:any )?information\b",
+    r"\bnot enough information\b",
+    r"\b(?:cannot|can't|can not) (?:answer|find)\b",
+)
+_ABSENCE_RE = re.compile("|".join(ABSENCE_PATTERNS), re.IGNORECASE)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _term_regex(term: str) -> "re.Pattern[str]":
+    # Same whole-word, case-insensitive match as detect_visibility
+    return re.compile(rf"(?<![\w.]){re.escape(term)}(?![\w])", re.IGNORECASE)
+
+
+def split_sentences(text: str) -> List[str]:
+    """Sentences of an answer: split at ., ! or ? followed by whitespace, and at line breaks."""
+    return [part.strip() for part in _SENTENCE_SPLIT.split(text or "") if part and part.strip()]
+
+
+@dataclass
+class MentionCheck:
+    mentioned: bool  # same as detect_visibility: a brand term appears anywhere
+    mentioned_excl_absence: bool  # a brand term appears in at least one non-absence sentence
+    mention_sentences: List[str]  # sentences with a brand term that count as mentions
+    absence_sentences: List[str]  # sentences with a brand term that are absence statements
+
+
+def detect_mentions(answer_text: str, terms: Sequence[str]) -> MentionCheck:
+    """
+    Brand mentions sentence by sentence. A sentence containing a brand term is an
+    absence statement when it matches ABSENCE_PATTERNS (curly apostrophes are
+    normalised first); the other brand-term sentences are mentions.
+    """
+    patterns = [_term_regex(term) for term in terms if term]
+    mention_sentences: List[str] = []
+    absence_sentences: List[str] = []
+    for sentence in split_sentences(answer_text):
+        if not any(p.search(sentence) for p in patterns):
+            continue
+        if _ABSENCE_RE.search(sentence.replace("\u2019", "'")):
+            absence_sentences.append(sentence)
+        else:
+            mention_sentences.append(sentence)
+    return MentionCheck(
+        mentioned=bool(mention_sentences or absence_sentences),
+        mentioned_excl_absence=bool(mention_sentences),
+        mention_sentences=mention_sentences,
+        absence_sentences=absence_sentences,
+    )
+
+
 def query_source_metrics(run_url_sets: Sequence[Sequence[str]], run_domain_sets: Sequence[Sequence[str]], visibilities: Sequence[ResponseVisibility]) -> Dict[str, Any]:
     """Metrics for one query over its successful runs."""
     positions = [v.citation_position for v in visibilities]
@@ -148,6 +208,7 @@ def aggregate_query_runs(
     """
     url_sets, domain_sets, visibilities, serialized = [], [], [], []
     inline_linked: List[bool] = []
+    mentioned_excl_absence: List[bool] = []
     pool_meta: Dict[str, Dict[str, Any]] = {}
     successful = parse_errors = 0
     for run in runs:
@@ -171,13 +232,15 @@ def aggregate_query_runs(
             keys.append(key)
             pool_meta.setdefault(key, {"url": c.url and canonical_url(c.url), "domain": c.domain, "title": c.title})
         visibility = detect_visibility(obs.answer_text, [c.domain for c in web], target_domain, terms)
+        mentions = detect_mentions(obs.answer_text, terms)
+        mentioned_excl_absence.append(mentions.mentioned_excl_absence)
         linked = _target_inline_linked(obs, target_domain)
         if linked is not None:
             inline_linked.append(linked)
         url_sets.append(list(dict.fromkeys(keys)))
         domain_sets.append(list(dict.fromkeys(c.domain for c in web)))
         visibilities.append(visibility)
-        serialized.append(_serialize_run(run, visibility, linked))
+        serialized.append(_serialize_run(run, visibility, linked, mentions))
 
     metrics = query_source_metrics(url_sets, domain_sets, visibilities)
     answered = len(url_sets)
@@ -190,6 +253,8 @@ def aggregate_query_runs(
             "overall_citation_rate": _rate(sum(1 for v in visibilities if v.cited), successful),
             "credits_used": _sum_credits(runs),
             "parse_errors": parse_errors,
+            # Mentions excluding absence-of-information statements, over the same runs as mention_rate
+            "mention_rate_excl_absence": _rate(sum(mentioned_excl_absence), len(mentioned_excl_absence)),
             # Secondary: answers whose text links to the target inline (snippet_links), not citations
             "inline_linked_runs": sum(inline_linked) if inline_linked else None,
             "inline_link_rate": _rate(sum(inline_linked), len(inline_linked)) if inline_linked else None,
@@ -200,6 +265,7 @@ def aggregate_query_runs(
         "url_sets": url_sets,
         "visibilities": visibilities,
         "inline_linked": inline_linked,
+        "mentioned_excl_absence": mentioned_excl_absence,
         "serialized": serialized,
         "metrics": metrics,
         "pool": [
@@ -393,7 +459,10 @@ async def _crawl_sources(urls: Sequence[str], concurrency: int) -> Dict[str, Dic
 
 
 def _serialize_run(
-    run: Dict[str, Any], visibility: Optional[ResponseVisibility], target_inline_linked: Optional[bool] = None
+    run: Dict[str, Any],
+    visibility: Optional[ResponseVisibility],
+    target_inline_linked: Optional[bool] = None,
+    mentions: Optional[MentionCheck] = None,
 ) -> Dict[str, Any]:
     if not run["ok"]:
         return {
@@ -424,6 +493,9 @@ def _serialize_run(
         "answer_text": obs.answer_text,
         "search_queries": obs.search_queries,
         "target": asdict(visibility) if visibility else None,
+        "mentioned_excl_absence": mentions.mentioned_excl_absence if mentions else None,
+        "mention_sentences": mentions.mention_sentences if mentions else None,
+        "absence_sentences": mentions.absence_sentences if mentions else None,
         "citations": [asdict(c) for c in obs.citations],
     }
 
@@ -484,6 +556,7 @@ async def run_stage1_job(
                     "metrics": aggregated["metrics"],
                     "_visibilities": aggregated["visibilities"],
                     "_inline_linked": aggregated["inline_linked"],
+                    "_mentioned_excl_absence": aggregated["mentioned_excl_absence"],
                 }
             )
         attempted = len(selected) * config.runs_per_query
@@ -495,6 +568,7 @@ async def run_stage1_job(
             for record in query_records:
                 record.pop("_visibilities")
                 record.pop("_inline_linked")
+                record.pop("_mentioned_excl_absence")
                 record.pop("pool")
                 record["sources"] = []
                 record["target_evidence"] = None
@@ -610,6 +684,7 @@ async def run_stage1_job(
         # Run-level aggregates
         all_visibilities = [v for r in query_records for v in r.pop("_visibilities")]
         all_inline_linked = [v for r in query_records for v in r.pop("_inline_linked")]
+        all_mentioned_excl_absence = [v for r in query_records for v in r.pop("_mentioned_excl_absence")]
         citation_categories = [
             (categories[c["domain"]].category if c["domain"] in categories else "other", categories[c["domain"]].competitor_group if c["domain"] in categories else "ai_visibility")
             for r in query_records
@@ -629,6 +704,7 @@ async def run_stage1_job(
             "unique_sources": len(pool_meta),
             "unique_domains": len(categories),
             "mention_rate": mention_rate(all_visibilities),
+            "mention_rate_excl_absence": _rate(sum(all_mentioned_excl_absence), len(all_mentioned_excl_absence)),
             "citation_rate": citation_rate(all_visibilities),
             "mean_citation_position": mean_citation_position(v.citation_position for v in all_visibilities),
             "median_citation_position": median_citation_position(v.citation_position for v in all_visibilities),
