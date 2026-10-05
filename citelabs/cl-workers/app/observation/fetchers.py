@@ -16,7 +16,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -52,6 +52,19 @@ class Observation:
     citations: List[ObservedCitation] = field(default_factory=list)
     search_queries: List[str] = field(default_factory=list)
     latency_seconds: float = 0.0
+    # "answer", or OUTCOME_NO_AI_ANSWER when the engine showed no AI answer for the
+    # query (a valid observation, not a failure)
+    outcome: str = "answer"
+    credits_used: Optional[int] = None  # paid API credits this observation consumed
+    fetch_meta: Dict[str, Any] = field(default_factory=dict)  # fetcher-specific provenance
+    # Sanitized raw API responses, in call order, so parsed fields can be rebuilt offline
+    raw_responses: List[Dict[str, Any]] = field(default_factory=list)
+
+
+OUTCOME_ANSWER = "answer"
+OUTCOME_NO_AI_ANSWER = "no_aio"
+# The engine answered but the response could not be parsed; credits were spent
+OUTCOME_PARSE_ERROR = "parse_error"
 
 
 class ObservationFetcher(ABC):
@@ -60,6 +73,17 @@ class ObservationFetcher(ABC):
     name: str = "base"
     # Shown next to any Stage 1 result so its provenance is never misread
     data_disclaimer: str = ""
+    # True when "no AI answer" is a possible outcome, so an activation rate is meaningful
+    reports_activation: bool = False
+
+    @property
+    def settings(self) -> Dict[str, Any]:
+        """Settings that define what was observed (stored with every run)."""
+        return {}
+
+    async def preflight(self, planned_observations: int) -> Dict[str, Any]:
+        """Check the run can be afforded before it starts; raise to refuse it."""
+        return {}
 
     @abstractmethod
     async def observe(self, query: str) -> Observation:
@@ -176,8 +200,12 @@ class GeminiGroundingFetcher(ObservationFetcher):
         )
 
 
-def get_observation_fetcher(name: str, model: str) -> ObservationFetcher:
+def get_observation_fetcher(name: str, model: str, serpapi_settings: Optional[Dict[str, str]] = None) -> ObservationFetcher:
     """Fetcher registry, selected by STAGE1_FETCHER."""
     if name == GeminiGroundingFetcher.name:
         return GeminiGroundingFetcher(model=model)
+    from .serpapi_aio import SerpApiAIOFetcher
+
+    if name == SerpApiAIOFetcher.name:
+        return SerpApiAIOFetcher(**(serpapi_settings or {}))
     raise ValueError(f"Unknown Stage 1 observation fetcher: {name}")

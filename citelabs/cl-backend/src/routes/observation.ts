@@ -21,6 +21,11 @@ type ObservationRunBody = {
   queries?: string[];
   runs_per_query?: number;
   query_count?: number;
+  // Optional overrides of the worker's STAGE1_FETCHER / STAGE1_SERPAPI_* settings
+  fetcher?: 'gemini_grounding' | 'serpapi_aio';
+  serpapi_gl?: string;
+  serpapi_hl?: string;
+  serpapi_device?: 'desktop' | 'mobile' | 'tablet';
 };
 
 type ProgressBody = {
@@ -45,6 +50,15 @@ type WorkerRun = {
   run_index: number;
   ok: boolean;
   error: string | null;
+  outcome?: string; // answer | no_aio | parse_error | error
+  credits_used?: number | null;
+  fetch_meta?: Record<string, unknown> | null;
+  parse_error?: string | null;
+  tables_seen?: number | null;
+  ragged_table?: boolean | null;
+  inline_links?: { text: string; link: string }[] | null; // snippet_links: not citations
+  target_inline_linked?: boolean | null;
+  raw_responses?: Record<string, unknown>[] | null;
   model?: string;
   latency_seconds?: number;
   answer_text?: string;
@@ -92,6 +106,14 @@ type WorkerQuery = {
     citation_rate: number | null;
     mean_citation_position: number | null;
     median_citation_position: number | null;
+    rates_based_on_runs?: number;
+    aio_runs?: number | null;
+    aio_activation_rate?: number | null;
+    overall_citation_rate?: number | null;
+    credits_used?: number | null;
+    parse_errors?: number;
+    inline_linked_runs?: number | null;
+    inline_link_rate?: number | null;
   };
 };
 
@@ -100,6 +122,8 @@ type WorkerResult = {
   error?: string;
   fetcher?: string;
   data_disclaimer?: string;
+  fetcher_settings?: Record<string, unknown>;
+  preflight?: Record<string, unknown>;
   config?: Record<string, unknown>;
   context?: Record<string, unknown>;
   metrics?: Record<string, any>;
@@ -126,7 +150,7 @@ export default async function observationRoutes(app: FastifyInstance) {
   // ==========================================
   app.post('/api/observation/run', async (request, reply) => {
     const body = (request.body || {}) as ObservationRunBody;
-    const { url, queries, runs_per_query, query_count } = body;
+    const { url, queries, runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device } = body;
 
     try {
       new URL(url || '');
@@ -147,13 +171,23 @@ export default async function observationRoutes(app: FastifyInstance) {
         sandboxUrl: url!,
         status: 'pending',
         requestedQueries: queries ?? [],
-        config: toJson({ runs_per_query, query_count }),
+        config: toJson({ runs_per_query, query_count, fetcher, serpapi_gl, serpapi_hl, serpapi_device }),
       },
     });
 
     try {
       // Awaited (the worker returns immediately) so an invalid config comes back as an error
-      await worker.startStage1({ observation_id: observationId, url: url!, queries, runs_per_query, query_count });
+      await worker.startStage1({
+        observation_id: observationId,
+        url: url!,
+        queries,
+        runs_per_query,
+        query_count,
+        fetcher,
+        serpapi_gl,
+        serpapi_hl,
+        serpapi_device,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       app.log.error({ err, observationId }, 'Failed to start Stage 1 in worker');
@@ -236,6 +270,14 @@ export default async function observationRoutes(app: FastifyInstance) {
         citationRate: q.metrics.citation_rate,
         meanCitationPosition: q.metrics.mean_citation_position,
         medianCitationPosition: q.metrics.median_citation_position,
+        ratesBasedOnRuns: q.metrics.rates_based_on_runs ?? null,
+        aioRuns: q.metrics.aio_runs ?? null,
+        aioActivationRate: q.metrics.aio_activation_rate ?? null,
+        overallCitationRate: q.metrics.overall_citation_rate ?? null,
+        creditsUsed: q.metrics.credits_used ?? null,
+        parseErrors: q.metrics.parse_errors ?? null,
+        inlineLinkedRuns: q.metrics.inline_linked_runs ?? null,
+        inlineLinkRate: q.metrics.inline_link_rate ?? null,
         targetEvidence: toJson(q.target_evidence),
       });
 
@@ -255,6 +297,15 @@ export default async function observationRoutes(app: FastifyInstance) {
           targetMentioned: r.target?.mentioned ?? null,
           targetCited: r.target?.cited ?? null,
           targetPosition: r.target?.citation_position ?? null,
+          outcome: r.outcome ?? null,
+          creditsUsed: r.credits_used ?? null,
+          fetchMeta: toJson(r.fetch_meta),
+          parseError: clean(r.parse_error ?? null),
+          tablesSeen: r.tables_seen ?? null,
+          raggedTable: r.ragged_table ?? null,
+          snippetLinks: toJson(r.inline_links),
+          targetInlineLinked: r.target_inline_linked ?? null,
+          rawResponses: toJson(r.raw_responses),
         });
         for (const c of r.citations) {
           citationRows.push({
@@ -325,6 +376,16 @@ export default async function observationRoutes(app: FastifyInstance) {
           meanSourceSetDiversity: m.mean_source_set_diversity ?? null,
           meanSourceSetStability: m.mean_source_set_stability ?? null,
           meanDomainSetStability: m.mean_domain_set_stability ?? null,
+          fetcherSettings: toJson(result.fetcher_settings),
+          preflight: toJson(result.preflight),
+          creditsUsed: m.credits_used ?? null,
+          ratesBasedOnRuns: m.rates_based_on_runs ?? null,
+          aioRuns: m.aio_runs ?? null,
+          aioActivationRate: m.aio_activation_rate ?? null,
+          overallCitationRate: m.overall_citation_rate ?? null,
+          parseErrors: m.parse_errors ?? null,
+          inlineLinkedRuns: m.inline_linked_runs ?? null,
+          inlineLinkRate: m.inline_link_rate ?? null,
           categoryBreakdown: toJson(m.category_breakdown),
           competitorGroupBreakdown: toJson(m.competitor_group_breakdown),
           sourceCategories: toJson(result.source_categories),
@@ -364,7 +425,7 @@ export default async function observationRoutes(app: FastifyInstance) {
               orderBy: { runIndex: 'asc' },
               ...(includeRaw
                 ? { include: { citations: { orderBy: { position: 'asc' } } } }
-                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true } }),
+                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true } }),
             },
           },
         },
@@ -397,6 +458,9 @@ export default async function observationRoutes(app: FastifyInstance) {
         uniqueSources: true,
         mentionRate: true,
         citationRate: true,
+        aioActivationRate: true,
+        parseErrors: true,
+        creditsUsed: true,
         createdAt: true,
       },
     });

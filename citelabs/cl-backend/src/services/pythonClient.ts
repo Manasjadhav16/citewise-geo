@@ -262,6 +262,10 @@ export class Worker {
     queries?: string[];
     runs_per_query?: number;
     query_count?: number;
+    fetcher?: string;
+    serpapi_gl?: string;
+    serpapi_hl?: string;
+    serpapi_device?: string;
   }): Promise<void> {
     const response = await fetch(`${this.baseUrl}/stage1/start`, {
       method: 'POST',

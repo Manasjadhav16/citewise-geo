@@ -25,7 +25,7 @@ import re
 import uuid
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -47,11 +47,18 @@ from ..geo_metrics import (
 from .categorize import SourceCategory, categorize_domains
 from .config import Stage1Config
 from .evidence import compress_query_sources
-from .fetchers import Observation, ObservationFetcher, get_observation_fetcher
+from .fetchers import OUTCOME_ANSWER, OUTCOME_PARSE_ERROR, Observation, ObservationFetcher, get_observation_fetcher
 
 logger = logging.getLogger(__name__)
 
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:4000")
+
+# A run stops observing after this many parse errors in a row (by completion order)
+MAX_CONSECUTIVE_PARSE_ERRORS = 3
+
+
+class ObservationSkipped(RuntimeError):
+    """Not attempted because the run was stopped (no credits spent)."""
 
 
 # ==========================================
@@ -118,6 +125,110 @@ def query_source_metrics(run_url_sets: Sequence[Sequence[str]], run_domain_sets:
         "mean_citation_position": mean_citation_position(positions),
         "median_citation_position": median_citation_position(positions),
     }
+
+
+def _rate(count: int, total: int) -> Optional[float]:
+    return (count / total) * 100.0 if total else None
+
+
+def aggregate_query_runs(
+    runs: Sequence[Dict[str, Any]],
+    target_domain: str,
+    terms: Sequence[str],
+    reports_activation: bool,
+) -> Dict[str, Any]:
+    """
+    One query's runs -> source sets, visibilities and metrics.
+
+    Runs are failed (ok=False), answered (outcome "answer"), or successful with no
+    AI answer (outcome "no_aio", e.g. Google showed no AI Overview). Mention %,
+    cited %, positions and Jaccard are over answered runs only; the activation
+    rate (answered / successful) and the overall citation rate (cited / successful)
+    are reported alongside, each with the number of runs it is based on.
+    """
+    url_sets, domain_sets, visibilities, serialized = [], [], [], []
+    inline_linked: List[bool] = []
+    pool_meta: Dict[str, Dict[str, Any]] = {}
+    successful = parse_errors = 0
+    for run in runs:
+        if not run["ok"]:
+            serialized.append(_serialize_run(run, None))
+            continue
+        obs: Observation = run["observation"]
+        if obs.outcome == OUTCOME_PARSE_ERROR:
+            # Answered but unparseable: not a successful observation, credits still counted
+            parse_errors += 1
+            serialized.append(_serialize_run(run, None))
+            continue
+        successful += 1
+        if obs.outcome != OUTCOME_ANSWER:
+            serialized.append(_serialize_run(run, None))
+            continue
+        web = sorted((c for c in obs.citations if c.is_web_source and c.domain), key=lambda c: c.order)
+        keys = []
+        for c in web:
+            key = canonical_url(c.url) if c.url else c.domain
+            keys.append(key)
+            pool_meta.setdefault(key, {"url": c.url and canonical_url(c.url), "domain": c.domain, "title": c.title})
+        visibility = detect_visibility(obs.answer_text, [c.domain for c in web], target_domain, terms)
+        linked = _target_inline_linked(obs, target_domain)
+        if linked is not None:
+            inline_linked.append(linked)
+        url_sets.append(list(dict.fromkeys(keys)))
+        domain_sets.append(list(dict.fromkeys(c.domain for c in web)))
+        visibilities.append(visibility)
+        serialized.append(_serialize_run(run, visibility, linked))
+
+    metrics = query_source_metrics(url_sets, domain_sets, visibilities)
+    answered = len(url_sets)
+    metrics.update(
+        {
+            "successful_runs": successful,  # answered + no-AI-answer runs
+            "rates_based_on_runs": answered,  # denominator of mention/cited %, positions, Jaccard
+            "aio_runs": answered if reports_activation else None,
+            "aio_activation_rate": _rate(answered, successful) if reports_activation else None,
+            "overall_citation_rate": _rate(sum(1 for v in visibilities if v.cited), successful),
+            "credits_used": _sum_credits(runs),
+            "parse_errors": parse_errors,
+            # Secondary: answers whose text links to the target inline (snippet_links), not citations
+            "inline_linked_runs": sum(inline_linked) if inline_linked else None,
+            "inline_link_rate": _rate(sum(inline_linked), len(inline_linked)) if inline_linked else None,
+        }
+    )
+    stability = source_stability(url_sets)
+    return {
+        "url_sets": url_sets,
+        "visibilities": visibilities,
+        "inline_linked": inline_linked,
+        "serialized": serialized,
+        "metrics": metrics,
+        "pool": [
+            {"key": key, "stability": stability[key], "appearances": round(stability[key] * len(url_sets))}
+            for key in union_sources(url_sets)
+        ],
+        "pool_meta": pool_meta,
+    }
+
+
+def _target_inline_linked(obs: Observation, target_domain: str) -> Optional[bool]:
+    """Whether the answer text links inline to the target's domain; None if the fetcher reports no inline links."""
+    links = obs.fetch_meta.get("inline_links")
+    if links is None:
+        return None
+    for link in links:
+        domain = normalize_domain(link.get("link", ""))
+        if domain and (domain == target_domain or domain.endswith("." + target_domain)):
+            return True
+    return False
+
+
+def _sum_credits(runs: Sequence[Dict[str, Any]]) -> Optional[int]:
+    values = [
+        (run["observation"].credits_used if run["ok"] else run.get("credits_used"))
+        for run in runs
+    ]
+    values = [v for v in values if v is not None]
+    return sum(values) if values else None
 
 
 # ==========================================
@@ -207,21 +318,40 @@ async def _select_queries(queries: Optional[List[str]], context: Dict[str, Any],
     return select_balanced_queries(generated, config.query_count)
 
 
-async def _observe_all(queries: List[Dict[str, str]], fetcher: ObservationFetcher, config: Stage1Config, observation_id: str) -> List[List[Dict[str, Any]]]:
-    """Every (query, run) pair; failures become run records with ok=False."""
+async def _observe_all(
+    queries: List[Dict[str, str]], fetcher: ObservationFetcher, config: Stage1Config, observation_id: str
+) -> Tuple[List[List[Dict[str, Any]]], bool]:
+    """
+    Every (query, run) pair; failures become run records with ok=False. Returns
+    (runs per query, stopped). After MAX_CONSECUTIVE_PARSE_ERRORS parse errors in
+    a row (by completion order), observations not yet started are skipped.
+    """
     semaphore = asyncio.Semaphore(config.observation_concurrency)
     completed = 0
     total = len(queries) * config.runs_per_query
+    streak = {"parse_errors": 0, "stopped": False}
 
     async def observe(query: str) -> Observation:
         nonlocal completed
         async with semaphore:
+            if streak["stopped"]:
+                raise ObservationSkipped(f"not run: stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors")
             try:
-                return await fetcher.observe(query)
+                observation = await fetcher.observe(query)
+            except Exception:
+                streak["parse_errors"] = 0
+                raise
             finally:
                 completed += 1
                 if completed % max(1, config.runs_per_query) == 0 or completed == total:
                     await _send_progress(observation_id, "observation", "progress", {"completed": completed, "total": total})
+            if observation.outcome == OUTCOME_PARSE_ERROR:
+                streak["parse_errors"] += 1
+                if streak["parse_errors"] >= MAX_CONSECUTIVE_PARSE_ERRORS:
+                    streak["stopped"] = True
+            else:
+                streak["parse_errors"] = 0
+            return observation
 
     runs_by_query: List[List[Dict[str, Any]]] = []
     tasks = [[observe(q["q"]) for _ in range(config.runs_per_query)] for q in queries]
@@ -230,11 +360,17 @@ async def _observe_all(queries: List[Dict[str, str]], fetcher: ObservationFetche
         runs = []
         for run_index, outcome in enumerate(query_outcomes):
             if isinstance(outcome, Exception):
-                runs.append({"run_index": run_index, "ok": False, "error": str(outcome)[:500]})
+                runs.append({
+                    "run_index": run_index,
+                    "ok": False,
+                    "error": f"{type(outcome).__name__}: {outcome}"[:500],
+                    "credits_used": getattr(outcome, "credits_used", None),
+                    "raw_responses": getattr(outcome, "raw_responses", None),
+                })
             else:
                 runs.append({"run_index": run_index, "ok": True, "observation": outcome})
         runs_by_query.append(runs)
-    return runs_by_query
+    return runs_by_query, streak["stopped"]
 
 
 async def _crawl_sources(urls: Sequence[str], concurrency: int) -> Dict[str, Dict[str, Optional[str]]]:
@@ -256,14 +392,33 @@ async def _crawl_sources(urls: Sequence[str], concurrency: int) -> Dict[str, Dic
     return dict(zip(urls, results))
 
 
-def _serialize_run(run: Dict[str, Any], visibility: Optional[ResponseVisibility]) -> Dict[str, Any]:
+def _serialize_run(
+    run: Dict[str, Any], visibility: Optional[ResponseVisibility], target_inline_linked: Optional[bool] = None
+) -> Dict[str, Any]:
     if not run["ok"]:
-        return {"run_index": run["run_index"], "ok": False, "error": run["error"], "citations": []}
+        return {
+            "run_index": run["run_index"],
+            "ok": False,
+            "error": run["error"],
+            "outcome": "error",
+            "credits_used": run.get("credits_used"),
+            "raw_responses": run.get("raw_responses"),
+            "citations": [],
+        }
     obs: Observation = run["observation"]
     return {
         "run_index": run["run_index"],
         "ok": True,
         "error": None,
+        "outcome": obs.outcome,
+        "credits_used": obs.credits_used,
+        "fetch_meta": {k: v for k, v in obs.fetch_meta.items() if k != "inline_links"},
+        "parse_error": obs.fetch_meta.get("parse_error"),
+        "tables_seen": obs.fetch_meta.get("tables_seen"),
+        "ragged_table": obs.fetch_meta.get("ragged_table"),
+        "inline_links": obs.fetch_meta.get("inline_links"),  # snippet_links: not citations
+        "target_inline_linked": target_inline_linked,
+        "raw_responses": obs.raw_responses or None,
         "model": obs.model,
         "latency_seconds": round(obs.latency_seconds, 2),
         "answer_text": obs.answer_text,
@@ -284,15 +439,19 @@ async def run_stage1_job(
     result: Dict[str, Any] = {"observation_id": observation_id, "sandbox_url": url, "status": "running"}
     try:
         config = Stage1Config.from_env(config_overrides)
-        fetcher = fetcher or get_observation_fetcher(config.fetcher, config.grounding_model)
+        fetcher = fetcher or get_observation_fetcher(config.fetcher, config.grounding_model, config.serpapi_settings)
         target_domain = normalize_domain(url)
         result.update(
             {
                 "fetcher": fetcher.name,
                 "data_disclaimer": fetcher.data_disclaimer,
+                "fetcher_settings": fetcher.settings,
                 "config": {k: v for k, v in asdict(config).items()},
             }
         )
+        # Paid fetchers refuse a run they cannot afford, before any other work
+        planned = (len([q for q in queries if q and q.strip()]) if queries else config.query_count) * config.runs_per_query
+        result["preflight"] = await fetcher.preflight(planned)
 
         await _send_progress(observation_id, "context", "started")
         context = await _build_context(url)
@@ -306,44 +465,48 @@ async def run_stage1_job(
         await _send_progress(observation_id, "query_selection", "success", {"queries": [q["q"] for q in selected]})
 
         await _send_progress(observation_id, "observation", "started", {"total": len(selected) * config.runs_per_query})
-        runs_by_query = await _observe_all(selected, fetcher, config, observation_id)
+        runs_by_query, stopped = await _observe_all(selected, fetcher, config, observation_id)
 
         # Per-query source pools
         query_records: List[Dict[str, Any]] = []
         pool_meta: Dict[str, Dict[str, Any]] = {}  # source key -> url/domain/title
         for q_index, (query, runs) in enumerate(zip(selected, runs_by_query)):
-            url_sets, domain_sets, visibilities, serialized = [], [], [], []
-            for run in runs:
-                if not run["ok"]:
-                    serialized.append(_serialize_run(run, None))
-                    continue
-                web = sorted((c for c in run["observation"].citations if c.is_web_source and c.domain), key=lambda c: c.order)
-                keys = []
-                for c in web:
-                    key = canonical_url(c.url) if c.url else c.domain
-                    keys.append(key)
-                    pool_meta.setdefault(key, {"url": c.url and canonical_url(c.url), "domain": c.domain, "title": c.title})
-                visibility = detect_visibility(run["observation"].answer_text, [c.domain for c in web], target_domain, terms)
-                url_sets.append(list(dict.fromkeys(keys)))
-                domain_sets.append(list(dict.fromkeys(c.domain for c in web)))
-                visibilities.append(visibility)
-                serialized.append(_serialize_run(run, visibility))
-
-            stability = source_stability(url_sets)
+            aggregated = aggregate_query_runs(runs, target_domain, terms, fetcher.reports_activation)
+            for key, meta in aggregated["pool_meta"].items():
+                pool_meta.setdefault(key, meta)
             query_records.append(
                 {
                     "query_index": q_index,
                     "query": query["q"],
                     "query_type": query["type"],
-                    "runs": serialized,
-                    "pool": [{"key": key, "stability": stability[key], "appearances": round(stability[key] * len(url_sets))} for key in union_sources(url_sets)],
-                    "metrics": query_source_metrics(url_sets, domain_sets, visibilities),
-                    "_visibilities": visibilities,
+                    "runs": aggregated["serialized"],
+                    "pool": aggregated["pool"],
+                    "metrics": aggregated["metrics"],
+                    "_visibilities": aggregated["visibilities"],
+                    "_inline_linked": aggregated["inline_linked"],
                 }
             )
         attempted = len(selected) * config.runs_per_query
         succeeded = sum(r["metrics"]["successful_runs"] for r in query_records)
         await _send_progress(observation_id, "observation", "success", {"attempted": attempted, "succeeded": succeeded})
+
+        if stopped:
+            message = f"Stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors; remaining observations were not run"
+            for record in query_records:
+                record.pop("_visibilities")
+                record.pop("_inline_linked")
+                record.pop("pool")
+                record["sources"] = []
+                record["target_evidence"] = None
+            result["metrics"] = {
+                "queries": len(query_records),
+                "runs_attempted": attempted,
+                "runs_succeeded": succeeded,
+                "parse_errors": sum(r["metrics"]["parse_errors"] for r in query_records),
+                "credits_used": _sum_credits([run for runs in runs_by_query for run in runs]),
+            }
+            result["queries"] = query_records
+            raise RuntimeError(message)
 
         # Categorise every source domain
         await _send_progress(observation_id, "categorization", "started")
@@ -446,6 +609,7 @@ async def run_stage1_job(
 
         # Run-level aggregates
         all_visibilities = [v for r in query_records for v in r.pop("_visibilities")]
+        all_inline_linked = [v for r in query_records for v in r.pop("_inline_linked")]
         citation_categories = [
             (categories[c["domain"]].category if c["domain"] in categories else "other", categories[c["domain"]].competitor_group if c["domain"] in categories else "ai_visibility")
             for r in query_records
@@ -471,6 +635,15 @@ async def run_stage1_job(
             "mean_source_set_diversity": mean_of("source_set_diversity"),
             "mean_source_set_stability": mean_of("source_set_stability"),
             "mean_domain_set_stability": mean_of("domain_set_stability"),
+            # Rates above are over runs with an AI answer; these put them in context
+            "rates_based_on_runs": len(all_visibilities),
+            "aio_runs": len(all_visibilities) if fetcher.reports_activation else None,
+            "aio_activation_rate": _rate(len(all_visibilities), succeeded) if fetcher.reports_activation else None,
+            "overall_citation_rate": _rate(sum(1 for v in all_visibilities if v.cited), succeeded),
+            "credits_used": _sum_credits([run for runs in runs_by_query for run in runs]),
+            "parse_errors": sum(r["metrics"]["parse_errors"] for r in query_records),
+            "inline_linked_runs": sum(all_inline_linked) if all_inline_linked else None,
+            "inline_link_rate": _rate(sum(all_inline_linked), len(all_inline_linked)) if all_inline_linked else None,
             "category_breakdown": category_breakdown((c for c, _ in citation_categories), taxonomy=config.source_categories),
             "competitor_group_breakdown": category_breakdown((g for _, g in citation_categories), taxonomy=("target", "direct_business", "ai_visibility")),
         }

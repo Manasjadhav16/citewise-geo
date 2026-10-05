@@ -321,6 +321,17 @@ model ObservationRun {
   categoryBreakdown        Json?  @map("category_breakdown") // % of citations per category
   competitorGroupBreakdown Json?  @map("competitor_group_breakdown") // target / direct_business / ai_visibility
   sourceCategories         Json?  @map("source_categories") // per domain: final, llm and heuristic labels
+  // Fetcher provenance and AI Overview activation (serpapi_aio); rates above are over runs with an AI answer
+  fetcherSettings          Json?  @map("fetcher_settings") // e.g. gl / hl / device for serpapi_aio
+  preflight                Json? // e.g. SerpApi searches left before the run
+  creditsUsed              Int?   @map("credits_used")
+  ratesBasedOnRuns         Int?   @map("rates_based_on_runs")
+  aioRuns                  Int?   @map("aio_runs")
+  aioActivationRate        Float? @map("aio_activation_rate")
+  overallCitationRate      Float? @map("overall_citation_rate") // cited / all successful runs
+  parseErrors              Int?   @map("parse_errors")
+  inlineLinkedRuns         Int?   @map("inline_linked_runs") // secondary: answers linking the target inline (not citations)
+  inlineLinkRate           Float? @map("inline_link_rate")
 
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @default(now()) @updatedAt @map("updated_at")
@@ -347,6 +358,14 @@ model ObservationQuery {
   meanCitationPosition   Float? @map("mean_citation_position")
   medianCitationPosition Float? @map("median_citation_position")
   targetEvidence         Json?  @map("target_evidence") // sandbox page's evidence for this query
+  ratesBasedOnRuns       Int?   @map("rates_based_on_runs")
+  aioRuns                Int?   @map("aio_runs")
+  aioActivationRate      Float? @map("aio_activation_rate")
+  overallCitationRate    Float? @map("overall_citation_rate")
+  creditsUsed            Int?   @map("credits_used")
+  parseErrors            Int?   @map("parse_errors")
+  inlineLinkedRuns       Int?   @map("inline_linked_runs")
+  inlineLinkRate         Float? @map("inline_link_rate")
 
   observation ObservationRun        @relation(fields: [observationId], references: [id], onDelete: Cascade)
   responses   ObservationResponse[]
@@ -371,6 +390,15 @@ model ObservationResponse {
   targetMentioned Boolean? @map("target_mentioned")
   targetCited     Boolean? @map("target_cited")
   targetPosition  Int?     @map("target_position")
+  outcome         String? // answer | no_aio | error
+  creditsUsed     Int?     @map("credits_used")
+  fetchMeta       Json?    @map("fetch_meta") // fetcher settings, engines called, search ids
+  parseError         String?  @map("parse_error")
+  tablesSeen         Int?     @map("tables_seen")
+  raggedTable        Boolean? @map("ragged_table") // a table row had fewer cells than its header
+  snippetLinks       Json?    @map("snippet_links") // inline links in the answer text; not citations
+  targetInlineLinked Boolean? @map("target_inline_linked")
+  rawResponses       Json?    @map("raw_responses") // sanitized raw API responses, in call order
 
   query     ObservationQuery      @relation(fields: [queryId], references: [id], onDelete: Cascade)
   citations ObservationCitation[]

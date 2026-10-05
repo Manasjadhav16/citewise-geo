@@ -210,6 +210,10 @@ class Stage1StartRequest(BaseModel):
     queries: Optional[List[str]] = None  # generated from the page when omitted
     runs_per_query: Optional[int] = None  # overrides STAGE1_RUNS_PER_QUERY
     query_count: Optional[int] = None  # overrides STAGE1_QUERY_COUNT
+    fetcher: Optional[str] = None  # overrides STAGE1_FETCHER: gemini_grounding | serpapi_aio
+    serpapi_gl: Optional[str] = None  # overrides STAGE1_SERPAPI_GL (serpapi_aio only)
+    serpapi_hl: Optional[str] = None  # overrides STAGE1_SERPAPI_HL
+    serpapi_device: Optional[str] = None  # overrides STAGE1_SERPAPI_DEVICE
 
 
 @app.post("/stage1/start")
@@ -225,11 +229,29 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
 
     from fastapi import HTTPException
 
-    overrides = {"runs_per_query": payload.runs_per_query, "query_count": payload.query_count}
+    overrides = {
+        "runs_per_query": payload.runs_per_query,
+        "query_count": payload.query_count,
+        "fetcher": payload.fetcher,
+        "serpapi_gl": payload.serpapi_gl,
+        "serpapi_hl": payload.serpapi_hl,
+        "serpapi_device": payload.serpapi_device,
+    }
     try:
-        Stage1Config.from_env(overrides)  # reject invalid config before starting
+        config = Stage1Config.from_env(overrides)  # reject invalid config before starting
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if config.fetcher == "serpapi_aio":
+        # Refuse a run the SerpApi account cannot pay for (the job checks again before fetching)
+        from .observation.fetchers import get_observation_fetcher
+        from .observation.serpapi_aio import SerpApiError
+
+        planned = (len([q for q in payload.queries if q.strip()]) if payload.queries else config.query_count) * config.runs_per_query
+        try:
+            await get_observation_fetcher(config.fetcher, config.grounding_model, config.serpapi_settings).preflight(planned)
+        except (SerpApiError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     asyncio.create_task(
         run_stage1_job(payload.observation_id, str(payload.url), payload.queries, overrides)
     )

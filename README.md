@@ -58,7 +58,7 @@ Traditional SEO optimizes for 10 blue links; **AEO & GEO** optimize for inclusio
 - **Vector Search & Semantic Retrieval**: Embeds and indexes content using Pinecone / FAISS vector stores and sentence transformers (`all-MiniLM-L6-v2`).
 - **RAG Simulation Engine**: Simulates generative search answer engines under strict citation criteria.
 - **Resilient Multi-Model Failover**: Intelligent rate-limiting and automatic model pool rotation across Google Gemini models (`gemini-3.7-flash`, `gemini-3.8-flash`, `gemini-3.5-flash-lite`) to avoid free-tier quota stalls.
-- **Two-Stage GEO Validation**: Grounds the competitor source pool in repeated real-world observations (Gemini with Google Search grounding, an approximate proxy for AI Overview citations) and measures before/after GEO improvement on a fixed question set and source pool. See [Two-Stage GEO Evaluation](#-two-stage-geo-evaluation).
+- **Two-Stage GEO Validation**: Grounds the competitor source pool in repeated real-world observations (Google AI Overview results via SerpApi, or Gemini with Google Search grounding as an approximate proxy) and measures before/after GEO improvement on a fixed question set and source pool. See [Two-Stage GEO Evaluation](#-two-stage-geo-evaluation).
 - **Interactive Analytics Dashboard**: Real-time polling progress bar, citation distributions, chunk analysis, and GEO/AEO scoring breakdown.
 
 ---
@@ -210,19 +210,44 @@ flowchart LR
 Stage 1 is a validation layer, not a blocker: the controlled score can always be computed without it (as an unseeded run), and Stage 1 results are used for seeding and for comparison.
 
 > [!IMPORTANT]
-> **Stage 1 is an approximate proxy, not Google AI Overview data.** It records Gemini's own search-and-cite behaviour with Google Search grounding. That uses the same underlying Google Search index that AI Overviews draw from, but it is not AI Overview output, and there is no official public AI Overview API. Treat Stage 1 results as an indication of which sources AI search answers tend to cite, never as real AI Overview citations. The UI shows this disclaimer next to every Stage 1 result, and the fetcher is pluggable (`ObservationFetcher` in `cl-workers/app/observation/fetchers.py`) so a better data source can replace it.
+> **What Stage 1 data is depends on the fetcher**, which is stored with every observation and shown next to every result:
+> - **`gemini_grounding`: an approximate proxy, not Google AI Overview data.** It records Gemini's own search-and-cite behaviour with Google Search grounding. That uses the same underlying Google Search index that AI Overviews draw from, but it is not AI Overview output. Treat these results as an indication of which sources AI search answers tend to cite, never as real AI Overview citations.
+> - **`serpapi_aio`: Google AI Overview results as returned by SerpApi** for the run's fixed country (`gl`), language (`hl`) and device. SerpApi is a third-party SERP API; Google offers no official public AI Overview API.
+>
+> Fetchers implement `ObservationFetcher` (`cl-workers/app/observation/fetchers.py`), so another data source can be added.
 
 ### Stage 1: Real-World Observation
 
 Code: `cl-workers/app/observation/`
 
 1. **Queries**: supplied by the caller, or a balanced selection (intent / experience / transaction) from the existing question generator, conditioned on the page's intent, category and domain summary.
-2. **Repeated observation**: each query is asked N times with Google Search grounding. Grounding source links are redirects; each is resolved to the real URL with one `HEAD` request. Search utility results (e.g. "current time") are kept in the raw data but flagged as not being web sources.
+2. **Repeated observation**: each query is observed N times through the configured fetcher (see *Stage 1 fetchers* below). Every run's raw ordered citation list is stored.
 3. **Union source pool**: per query, `Sq = S1 ∪ S2 ∪ … ∪ SN` over successful runs. Nothing is averaged or dropped; each source keeps its stability (share of runs that cited it), and every run's raw ordered citation list is stored.
 4. **Categorisation**: every source domain gets one of `target_company, direct_competitor, indirect_competitor, government, reference, media, community, industry_organization, academic, other`. The target's own domain is matched deterministically; otherwise an LLM classifier decides, with domain heuristics (`.gov`, `.edu`, `.ac.in`, Wikipedia, Reddit, …) as the fallback and a stored cross-check. Categories roll up into **direct business competitors** (sell a competing product) and **AI visibility competitors** (everyone else occupying citation space).
 5. **Evidence-preserving compression**: for each (query, source) pair, the model extracts the evidence that could influence the answer or citation decision for that query (facts, statistics, definitions, entities, product details, claims, specs, comparisons, expert statements, quoted excerpts), not a generic summary. Per-source budget: `min(1000, 20000 / sources)`, never below a 200-token floor.
 
 A single failed observation, crawl or compression is recorded and skipped; it never fails the run.
+
+### Stage 1 fetchers
+
+Selected with `STAGE1_FETCHER`, or per request with `"fetcher"` in `POST /api/observation/run`.
+
+**`gemini_grounding`** (default, the proxy): Gemini with Google Search grounding. Grounding source links are redirects, each resolved to the real URL with one `HEAD` request; search utility results (e.g. "current time") are kept in the raw data but flagged as not being web sources.
+
+**`serpapi_aio`** (Google AI Overviews via SerpApi; code: `observation/serpapi_aio.py`):
+
+- **Flow:** `engine=google` with `gl`, `hl`, `device` and `no_cache=true`. If `ai_overview` holds only a `page_token` (it expires in about a minute), `engine=google_ai_overview` is called with it immediately, also with `no_cache=true`. Settings come from `STAGE1_SERPAPI_GL` / `_HL` / `_DEVICE` (defaults `in`, `en`, `desktop`), can be overridden per request, and are fixed for the whole run.
+- **Citations** are `ai_overview.references`, in order, and nothing else. **Inline links** inside the answer text (`snippet_links`) are stored per response with a `target_inline_linked` flag and reported as a separate, secondary *inline-linked* rate; they are never counted as citations.
+- **Answer text** is every text block's title and snippet, list items, nested blocks, and each table cell (from the table's `detailed` rows).
+- **Outcomes** per observation: `answer`; `no_aio` (Google showed no AI Overview: a valid observation, not a failure); `parse_error`; or a failure. **AIO activation rate** = runs with an AI Overview ÷ successful runs.
+- **Rates:** mention %, cited %, citation positions and Jaccard are computed over runs that showed an AI Overview. Reported alongside: the activation rate, the *overall cited %* (cited runs ÷ all successful runs, including no-AI-Overview runs), and the number of runs each rate is based on.
+- **Strict parsing:** a text block type other than `paragraph`, `heading`, `list`, `table` or `expandable`, or a missing required field, makes that observation a `parse_error`. Its credits still count, the run continues, and the run summary shows the parse-error count. After 3 consecutive parse errors the run stops; observations not yet started are skipped and spend nothing.
+- **Credits:** before starting, the worker reads the account's `total_searches_left` (free) and refuses a run whose worst case (2 credits per observation) exceeds it; during the run, requests stop once that number is reached. Credits used are recorded per observation and per run.
+- **Raw storage and re-parsing:** both raw responses of every observation are stored, sanitized (API key, account fields, and search-archive/markdown links removed). `research/reparse_serpapi_observation.py` rebuilds every parsed field from the stored responses with the same parser, without spending credits, and reports any difference from the stored values.
+
+**Known limitation (tables):** SerpApi sometimes returns table rows with fewer cells than the header; the dropped cells appear to be ones that were links. Responses with such a table are flagged (`ragged_table`). A brand that appears only in a dropped cell is not in the answer text, so **the mention rate can undercount**.
+
+**How "mentioned" is decided (Stage 1, both fetchers):** a case-insensitive, whole-word string match of the brand name (from intent extraction) or the target's domain against the answer text (`detect_visibility` in `observation/stage1_job.py`). No entity model is involved, and negation is not handled: "there is no mention of Razorpay" counts as a mention. "Cited" is separate: the target's domain is among the answer's citations.
 
 ### Stage 2: Controlled Generative Environment
 
@@ -295,12 +320,13 @@ Add `"dry_run": true` to a `/api/sandbox/run` request to validate it and see the
 | `STAGE1_MIN_SOURCE_TOKENS` | `200` | Floor per source; also caps sources per query at budget ÷ floor |
 | `STAGE1_COMPRESSION_BATCH_SIZE` | `5` | Evidence calls in flight at once |
 | `STAGE1_GROUNDING_MODEL` | `gemini-2.5-flash` | Model for grounded observations (never rotated mid-run) |
-| `STAGE1_FETCHER` | `gemini_grounding` | Observation fetcher |
+| `STAGE1_FETCHER` | `gemini_grounding` | Observation fetcher: `gemini_grounding` (proxy) or `serpapi_aio` (Google AI Overviews via SerpApi) |
+| `STAGE1_SERPAPI_GL` / `_HL` / `_DEVICE` | `in` / `en` / `desktop` | `serpapi_aio` country, language and device, fixed per run (needs `SERPAPI_KEY`) |
 | `SOURCE_CATEGORIES` | built-in list | Comma-separated taxonomy override |
 | `STAGE2_MAX_SOURCES` | `40` | Maximum merged source pool for seeded Stage 2 runs |
 | `STAGE2_CRAWL_CONCURRENCY` | `8` | Concurrent page fetches in Stage 2 |
 
-Also available: `STAGE1_OBSERVATION_CONCURRENCY`, `STAGE1_CRAWL_CONCURRENCY`, `STAGE1_MAX_PAGE_CHARS`, `STAGE1_CLASSIFICATION_BATCH_SIZE`, `STAGE1_GROUNDING_MAX_RETRIES`, and `STAGE1_RESULT_DIR` (writes each raw Stage 1 result to a JSON file).
+Also available: `STAGE1_OBSERVATION_CONCURRENCY`, `STAGE1_CRAWL_CONCURRENCY`, `STAGE1_MAX_PAGE_CHARS`, `STAGE1_CLASSIFICATION_BATCH_SIZE`, `STAGE1_GROUNDING_MAX_RETRIES`, `STAGE1_RESULT_DIR` (writes each raw Stage 1 result to a JSON file) and `STAGE1_SERPAPI_RAW_DIR` (also writes each sanitized raw SerpApi response to a file).
 
 **Cost and time.** Every observation is one grounded call and every (query, source) pair one evidence call, all rate-limited (14 requests per minute per model on the free tier). The defaults (10 × 15) mean roughly 150 grounded calls and a few hundred evidence calls: expect 45+ minutes, and more than a free-tier key's daily quota. For testing, use `runs_per_query` and `query_count` of 3–5 per request.
 

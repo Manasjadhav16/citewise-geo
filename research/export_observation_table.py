@@ -47,11 +47,14 @@ def main():
     # Stored per-domain category labels (observation_runs.source_categories)
     domain_category = {d: c["category"] for d, c in (obs.get("sourceCategories") or {}).items()}
     taxonomy = (obs.get("config") or {}).get("source_categories") or sorted(set(domain_category.values()))
+    # Real AI Overview data (serpapi_aio) has activation, parse errors, credits and inline links
+    is_aio = obs.get("fetcher") == "serpapi_aio"
 
     rows = []
     for q in obs["queries"]:
         responses = q["responses"]
-        ok_runs = [r for r in responses if r["ok"]]
+        # Runs whose answer was parsed (for AI Overviews: runs that showed one)
+        ok_runs = [r for r in responses if r["ok"] and r.get("outcome") in (None, "answer")]
         web_citations = [
             (r["runIndex"], c) for r in ok_runs for c in r["citations"] if c["isWebSource"] and c["domain"]
         ]
@@ -73,7 +76,7 @@ def main():
             "query": q["query"],
             "runs_succeeded": q["successfulRuns"],
             "runs_attempted": len(responses),
-            "rates_based_on_runs": q["successfulRuns"],
+            "rates_based_on_runs": q["ratesBasedOnRuns"] if q.get("ratesBasedOnRuns") is not None else q["successfulRuns"],
             "unique_sources": q["sourceSetDiversity"],
             "unique_domains": q["domainDiversity"],
             "mean_pairwise_jaccard_urls": q["sourceSetStability"],
@@ -84,6 +87,22 @@ def main():
             "median_citation_position": q["medianCitationPosition"],
             "web_citations_total": len(web_citations),
         }
+        if is_aio:
+            answered = [r for r in responses if r.get("outcome") == "answer"]
+            row.update({
+                "aio_runs": q.get("aioRuns"),
+                "aio_activation_pct": q.get("aioActivationRate"),
+                "overall_cited_pct": q.get("overallCitationRate"),
+                "no_aio_runs": sum(1 for r in responses if r.get("outcome") == "no_aio"),
+                "parse_errors": q.get("parseErrors"),
+                "failed_runs": sum(1 for r in responses if not r["ok"]),
+                "credits_used": q.get("creditsUsed"),
+                # Secondary metric: inline links in the answer text, never counted as citations
+                "target_inline_linked_runs": q.get("inlineLinkedRuns"),
+                "target_inline_linked_pct": q.get("inlineLinkRate"),
+                "responses_with_tables": sum(1 for r in answered if (r.get("tablesSeen") or 0) > 0),
+                "responses_with_ragged_table": sum(1 for r in answered if r.get("raggedTable")),
+            })
         for category in taxonomy:
             row[f"pool_sources_{category}"] = pool_counts.get(category, 0)
         for category in taxonomy:
@@ -114,7 +133,7 @@ def main():
             writer.writerow({k: (NA if v is None else v) for k, v in row.items()})
 
     # Markdown: same values, rounded for reading
-    lines = [
+    lines: list = [
         f"# Per-query results: observation `{args.observation_id}`",
         "",
         f"- **Analyzed page:** {analyzed_url}",
@@ -123,6 +142,15 @@ def main():
         f"- **Data source:** {obs.get('dataDisclaimer') or NA}",
         f"- **Runs:** {obs.get('runsSucceeded')}/{obs.get('runsAttempted')} succeeded "
         f"({(obs.get('config') or {}).get('runs_per_query', NA)} per query)",
+    ]
+    if is_aio:
+        settings = obs.get("fetcherSettings") or {}
+        lines += [
+            f"- **SerpApi settings:** gl={settings.get('gl')}, hl={settings.get('hl')}, device={settings.get('device')}, no_cache={settings.get('no_cache')}",
+            f"- **AI Overview runs:** {fmt(obs.get('aioRuns'))} (activation {fmt(obs.get('aioActivationRate'), 1)}%) · "
+            f"**parse errors:** {fmt(obs.get('parseErrors'))} · **SerpApi credits:** {fmt(obs.get('creditsUsed'))}",
+        ]
+    lines += [
         "",
         "All values are stored values from the observation; nothing is estimated. `n/a` means the value "
         "was not stored or cannot be computed (e.g. Jaccard needs at least 2 successful runs). Rates and "
@@ -130,6 +158,19 @@ def main():
         "(search-engine utility results are excluded), and each citation's category is the stored label of "
         "its domain. Full precision is in the accompanying CSV.",
         "",
+        *(
+            [
+                "For AI Overview data, mention %, cited %, positions and Jaccard are over runs that showed an AI Overview "
+                "(*Rates over* below). *Overall cited %* is cited runs over all successful runs, including runs with no AI "
+                "Overview. Mentions are a case-insensitive whole-word match of the brand name or domain in the answer text, "
+                "including table cells; a brand that appears only in a table cell SerpApi dropped is not counted, so the "
+                "mention rate can undercount (see *Responses with tables (ragged)*). *Inline-linked* counts answers whose text links to the "
+                "target (snippet_links); these are not citations.",
+                "",
+            ]
+            if is_aio
+            else []
+        ),
         "## Summary",
         "",
         "| # | Query | Runs (ok/attempted) | Unique sources (domains) | Mean Jaccard, URLs / domains | Mention % | Cited % | Citation position, mean / median | Analyzed page cited? |",
@@ -145,6 +186,21 @@ def main():
             f"{row['analyzed_page_cited']} |"
         )
 
+    if is_aio:
+        lines += [
+            "",
+            "## AI Overview activation, parse errors and secondary metrics",
+            "",
+            "| # | Runs: AIO / no AIO / parse error / failed | Activation % | Rates over (runs) | Overall cited % | Inline-linked runs (%) | Responses with tables (ragged) | Credits |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        for row, *_ in rows:
+            lines.append(
+                f"| {row['query_index']} | {fmt(row['aio_runs'])} / {row['no_aio_runs']} / {fmt(row['parse_errors'])} / {row['failed_runs']} | "
+                f"{fmt(row['aio_activation_pct'], 1)} | {row['rates_based_on_runs']} | {fmt(row['overall_cited_pct'], 1)} | "
+                f"{fmt(row['target_inline_linked_runs'])} ({fmt(row['target_inline_linked_pct'], 1)}) | "
+                f"{row['responses_with_tables']} ({row['responses_with_ragged_table']}) | {fmt(row['credits_used'])} |"
+            )
     lines += ["", "## Category counts", ""]
     lines.append("*Citations across runs* counts every web citation in every successful run (a source cited in 3 runs counts 3 times); "
                  "use it for share-of-citations claims. *Distinct sources in pool* counts each source in the query's union pool once.")

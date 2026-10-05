@@ -44,7 +44,16 @@ type ObservationQuery = {
   citationRate: number | null;
   meanCitationPosition: number | null;
   sources: ObservationSource[];
-  responses: { id: string; runIndex: number; ok: boolean; error: string | null }[];
+  responses: { id: string; runIndex: number; ok: boolean; error: string | null; outcome?: string | null; parseError?: string | null }[];
+  // serpapi_aio
+  ratesBasedOnRuns?: number | null;
+  aioRuns?: number | null;
+  aioActivationRate?: number | null;
+  overallCitationRate?: number | null;
+  parseErrors?: number | null;
+  inlineLinkedRuns?: number | null;
+  inlineLinkRate?: number | null;
+  creditsUsed?: number | null;
 };
 
 type ObservationEvent = { id: string; step: string; status: string; payload: Record<string, any> | null; timestamp: string };
@@ -69,6 +78,16 @@ type Observation = {
   meanSourceSetStability: number | null;
   categoryBreakdown: Record<string, number> | null;
   competitorGroupBreakdown: Record<string, number> | null;
+  fetcher?: string | null;
+  fetcherSettings?: { gl?: string; hl?: string; device?: string } | null;
+  ratesBasedOnRuns?: number | null;
+  aioRuns?: number | null;
+  aioActivationRate?: number | null;
+  overallCitationRate?: number | null;
+  parseErrors?: number | null;
+  inlineLinkedRuns?: number | null;
+  inlineLinkRate?: number | null;
+  creditsUsed?: number | null;
   events: ObservationEvent[];
   queries: ObservationQuery[];
 };
@@ -76,7 +95,7 @@ type Observation = {
 const STEP_LABELS: Record<string, string> = {
   context: 'Analysing the page',
   query_selection: 'Selecting queries',
-  observation: 'Observing grounded answers',
+  observation: 'Observing AI answers',
   categorization: 'Categorising sources',
   crawling_sources: 'Crawling cited pages',
   evidence_compression: 'Extracting evidence',
@@ -174,6 +193,9 @@ const ObservationPage = () => {
   };
 
   const latest = observation?.events?.[0];
+  // Real AI Overview data (SerpApi): rates are over runs that showed an AI Overview
+  const isAio = observation?.fetcher === 'serpapi_aio';
+  const ratesOver = isAio ? ` (over ${observation?.ratesBasedOnRuns ?? 0} runs with an AI Overview)` : '';
   const inProgress = observation && (observation.status === 'pending' || observation.status === 'running');
 
   return (
@@ -238,8 +260,8 @@ const ObservationPage = () => {
                   </button>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatTile label="Mention rate" value={fmtPct(observation.mentionRate)} hint="Answers that name your brand" />
-                  <StatTile label="Citation rate" value={fmtPct(observation.citationRate)} hint="Answers that cite your site as a source" />
+                  <StatTile label="Mention rate" value={fmtPct(observation.mentionRate)} hint={`Answers that name your brand${ratesOver}`} />
+                  <StatTile label="Citation rate" value={fmtPct(observation.citationRate)} hint={`Answers that cite your site as a source${ratesOver}`} />
                   <StatTile label="Mean / median position" value={`${fmtNum(observation.meanCitationPosition, 1)} / ${fmtNum(observation.medianCitationPosition, 1)}`} hint="Your rank among cited domains, when cited" />
                   <StatTile label="Source-set stability" value={fmtNum(observation.meanSourceSetStability)} hint="Mean pairwise Jaccard between runs (1 = identical sources every run)" />
                   <StatTile label="Unique sources" value={`${observation.uniqueSources ?? '—'}`} hint={`${observation.uniqueDomains ?? '—'} domains across all queries`} />
@@ -247,6 +269,23 @@ const ObservationPage = () => {
                   <StatTile label="Runs" value={`${observation.runsSucceeded ?? 0} / ${observation.runsAttempted ?? 0}`} hint="Successful / attempted observations" />
                   <StatTile label="Business category" value={<span className="text-base font-medium">{observation.context?.business_category || '—'}</span>} />
                 </div>
+                {isAio && (
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    <StatTile
+                      label="AI Overview activation"
+                      value={fmtPct(observation.aioActivationRate)}
+                      hint={`${observation.aioRuns ?? 0} of ${observation.runsSucceeded ?? 0} successful runs showed an AI Overview`}
+                    />
+                    <StatTile label="Overall cited" value={fmtPct(observation.overallCitationRate)} hint="Cited runs ÷ all successful runs, incl. runs with no AI Overview" />
+                    <StatTile
+                      label="Inline-linked (secondary)"
+                      value={fmtPct(observation.inlineLinkRate)}
+                      hint={`${observation.inlineLinkedRuns ?? 0} AI Overview(s) link your site inline in the text. Not counted as citations.`}
+                    />
+                    <StatTile label="Parse errors" value={observation.parseErrors ?? 0} hint="Answers that could not be parsed (credits still spent)" />
+                    <StatTile label="SerpApi credits" value={observation.creditsUsed ?? '—'} />
+                  </div>
+                )}
                 <div className="grid lg:grid-cols-2 gap-6">
                   <ShareChart title="Citation share by competitor group" breakdown={observation.competitorGroupBreakdown} />
                   <ShareChart title="AI visibility competition (share by category)" breakdown={observation.categoryBreakdown} />
@@ -266,6 +305,15 @@ const ObservationPage = () => {
                     <div><span className="text-gray-400">Diversity:</span> {q.sourceSetDiversity ?? '—'} sources</div>
                     <div><span className="text-gray-400">Stability:</span> {fmtNum(q.sourceSetStability)}</div>
                   </div>
+                  {isAio && (
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-sm">
+                      <div><span className="text-gray-400">AI Overview:</span> {q.aioRuns ?? 0}/{q.successfulRuns} runs ({fmtPct(q.aioActivationRate, 0)})</div>
+                      <div><span className="text-gray-400">Rates over:</span> {q.ratesBasedOnRuns ?? 0} runs</div>
+                      <div><span className="text-gray-400">Overall cited:</span> {fmtPct(q.overallCitationRate, 0)}</div>
+                      <div><span className="text-gray-400">Inline-linked:</span> {q.inlineLinkedRuns ?? 0} ({fmtPct(q.inlineLinkRate, 0)})</div>
+                      <div><span className="text-gray-400">Parse errors:</span> {q.parseErrors ?? 0}</div>
+                    </div>
+                  )}
                   {q.responses.some((r) => !r.ok) && (
                     <p className="text-xs text-amber-400 mb-4">
                       {q.responses.filter((r) => !r.ok).length} run(s) failed and are excluded from these metrics.

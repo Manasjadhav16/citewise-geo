@@ -1,0 +1,547 @@
+{
+ "note": "Real SerpApi responses from the 2026-10-05 smoke test (gl=in, hl=en, desktop), sanitized; engine=google responses trimmed to search_metadata/search_parameters/ai_overview.",
+ "query": "What are the best payment gateway options for startups and SMEs in India?",
+ "runs": [
+  [
+   {
+    "search_metadata": {
+     "id": "6ac3a02f06ca7fa0f3362531",
+     "status": "Success",
+     "created_at": "2026-10-05 13:03:43 UTC",
+     "processed_at": "2026-10-05 13:03:43 UTC",
+     "google_url": "https://www.google.com/search?q=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India%3F&oq=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India%3F&hl=en&gl=in&sourceid=chrome&ie=UTF-8",
+     "total_time_taken": 52.89
+    },
+    "search_parameters": {
+     "engine": "google",
+     "q": "What are the best payment gateway options for startups and SMEs in India?",
+     "google_domain": "google.com",
+     "hl": "en",
+     "gl": "in",
+     "device": "desktop"
+    },
+    "ai_overview": {
+     "page_token": "2VHeTXiczVXbkqJIEP2A_Y7lhVlBsb10BNFR0LTirUXb27wQUGABclGKFu23_Zf9qn3cL9kCRPHWPTMPG1sRUFRVZpJ5Kk-cP_9ybX_192__WFG0xo8ME8dxCQUBcs0SDDxGw3sfMsvAxSG0npDL2z6Fg_cQmrbBQysMPJOyXN70qf2W5yiIeZYybX5Re37WtsP4Ve2GcQMOH7RNRQNUGo1XdQ2bDvnZzsGMypDX6nfumSxKuGT6aksotVpKv_3af9titlRhK1zpldE8YgP-04FkoAABiOQB8l0rcij-SDRJIrYykAqeQjoVvBE5FpJJVtL1y_1ochpIto4BVKfttWIABsdYyl3vTnHRyya5n2VDvATpyuPTkSUgokNqX1re3kxLz0arcHoXeYn4FUskYElDRECVchd0_hulaJ_YxOlXWwZDoQaUWLkPd-IuA9EDg47yeYUg6YjRHHXzlQ5YssMYiPQvy-ghmcqMDS2YfoQ4aWvxrckGraXX3SzXM2f72gb7jcU5nfAN1IeyUEEM1ImdG2iGaaiWyj6l63Kl_MA2uXrjW0opiI-cwkVOLWJrodsVPOiAUq8klHM2iUVwi0gmu5Nb3ZOQIaleuHGW3KMMrptOFIOz5eFSSIcvJCCdYym-tJPjI8_Jxw6B9_OLzD0IS67YJOaZnDIGSBEOSY1Od3eWpiyJp0TEsyZ9vapSuOwr4i9nGSMB9HNI42MiZ2ChTtKI-R_ES7wQKUMk0KAUpymUslAnPiigL4ijy5zkBHvihbKYwjF6-j55JwfT1L4lEfqIwmhM4AHjQ0VJLsGhuBfxskx0VXc2xuTp3e6Ir4Zwo19uWeW0uWBBkT0vBgiXu9na3Ww6MttVMRw1w1q743rr-DZbAk__OQmC_zdK5QKFMoG6TynxRyhFBArdEKgDH7JmygVK6RwE6j6lumkiB4FKvHOBGh5MTgJ1TalOkVK9DFK5kRV0KVA_TSnpE0oduX-DUqT0W5SS71EqF6gCpVaXAlWs-yRQOaV-TaCUXxOolGFmNp2r1buD7qtWq8VNquNZQ4V49Lz6MKVJeezL02d2rnypWksvevQ0w_2m2sajUOlEe-ObSjaCR9OgNvzM0iJaC006skxaN3FEr7W9Z_oRjbTIjLU9HawjO_AxvQxCGkdaGL2vMa35Bj3uS5i2fVr2DVt7ojw3DHhWq5vBTqh_NOrAnPYWK0twFKWK54PGuvZhd9iNMWmM1YY__wiBNHW4vhP5UZP7ow_dVXvEbd1IwbpjyUIT1beuATjzrRuMuMZDedzTOHFZ3UAnqL5tQ8-c1eZTMNhMtHLcHkfT3Sb-Pv2-qw60Sqs-mc1lx9HsNCvMA6xHThWNyoMFRWrHJl-mvBDypHuqCAwUMEMAAnEBFNLAEy0gcwyUFmkISaiQq6Yw1FQTb3momzps1PR6tQIfyvUHykPRfs03WQr7IV_-F6qzYVw",
+     "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=2VHeTXiczVXbkqJIEP2A_Y7lhVlBsb10BNFR0LTirUXb27wQUGABclGKFu23_Zf9qn3cL9kCRPHWPTMPG1sRUFRVZpJ5Kk-cP_9ybX_192__WFG0xo8ME8dxCQUBcs0SDDxGw3sfMsvAxSG0npDL2z6Fg_cQmrbBQysMPJOyXN70qf2W5yiIeZYybX5Re37WtsP4Ve2GcQMOH7RNRQNUGo1XdQ2bDvnZzsGMypDX6nfumSxKuGT6aksotVpKv_3af9titlRhK1zpldE8YgP-04FkoAABiOQB8l0rcij-SDRJIrYykAqeQjoVvBE5FpJJVtL1y_1ochpIto4BVKfttWIABsdYyl3vTnHRyya5n2VDvATpyuPTkSUgokNqX1re3kxLz0arcHoXeYn4FUskYElDRECVchd0_hulaJ_YxOlXWwZDoQaUWLkPd-IuA9EDg47yeYUg6YjRHHXzlQ5YssMYiPQvy-ghmcqMDS2YfoQ4aWvxrckGraXX3SzXM2f72gb7jcU5nfAN1IeyUEEM1ImdG2iGaaiWyj6l63Kl_MA2uXrjW0opiI-cwkVOLWJrodsVPOiAUq8klHM2iUVwi0gmu5Nb3ZOQIaleuHGW3KMMrptOFIOz5eFSSIcvJCCdYym-tJPjI8_Jxw6B9_OLzD0IS67YJOaZnDIGSBEOSY1Od3eWpiyJp0TEsyZ9vapSuOwr4i9nGSMB9HNI42MiZ2ChTtKI-R_ES7wQKUMk0KAUpymUslAnPiigL4ijy5zkBHvihbKYwjF6-j55JwfT1L4lEfqIwmhM4AHjQ0VJLsGhuBfxskx0VXc2xuTp3e6Ir4Zwo19uWeW0uWBBkT0vBgiXu9na3Ww6MttVMRw1w1q743rr-DZbAk__OQmC_zdK5QKFMoG6TynxRyhFBArdEKgDH7JmygVK6RwE6j6lumkiB4FKvHOBGh5MTgJ1TalOkVK9DFK5kRV0KVA_TSnpE0oduX-DUqT0W5SS71EqF6gCpVaXAlWs-yRQOaV-TaCUXxOolGFmNp2r1buD7qtWq8VNquNZQ4V49Lz6MKVJeezL02d2rnypWksvevQ0w_2m2sajUOlEe-ObSjaCR9OgNvzM0iJaC006skxaN3FEr7W9Z_oRjbTIjLU9HawjO_AxvQxCGkdaGL2vMa35Bj3uS5i2fVr2DVt7ojw3DHhWq5vBTqh_NOrAnPYWK0twFKWK54PGuvZhd9iNMWmM1YY__wiBNHW4vhP5UZP7ow_dVXvEbd1IwbpjyUIT1beuATjzrRuMuMZDedzTOHFZ3UAnqL5tQ8-c1eZTMNhMtHLcHkfT3Sb-Pv2-qw60Sqs-mc1lx9HsNCvMA6xHThWNyoMFRWrHJl-mvBDypHuqCAwUMEMAAnEBFNLAEy0gcwyUFmkISaiQq6Yw1FQTb3momzps1PR6tQIfyvUHykPRfs03WQr7IV_-F6qzYVw"
+    }
+   },
+   {
+    "search_metadata": {
+     "id": "6ac3a0642ddc436d3f20be29",
+     "status": "Success",
+     "created_at": "2026-10-05 13:04:36 UTC",
+     "processed_at": "2026-10-05 13:04:36 UTC",
+     "google_ai_overview_url": "https://www.google.com/async/folsrch?gl=in&sourceid=chrome&hl=en&yv=3&cs=0&ei=Y6DDavPwO_Krw8cP5aq2aA&async=_basejs:/xjs/_/js/k%3Dxjs.s.en_GB.GGQMHOMTvs0.2023.O/am%3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgIAQABACABAAIAAAAAAAAAAAAAAAAAAAAAAAAABAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEEAABIAEAAAAAAAAAABBAAAAACAAAAAAAAAAgAEABAAgAIQAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAEIEAAAAIhAAACAAAAA_jHmGwAANAAAAAAAgAQAAAAAAAAAAAAAAAAAAAAAAAAAJAAAAAAAAAAAALAAAAAAIMAAAAACQAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAACgAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAACAAAAAAEABAAAAAAAAGAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAAECAAQAAAAAAAAAAAFAAEPgBBAEIAAAAAAAgAAAAAAAAAAAAACQAAQAAAAAAAAAIAAAwAAAAAHIAPB6AQwQFAAAAAAAAAAAAAAAAAAAAAAAAAAAACIACmANJQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABARXgKAAAAAAAAbA0ABA/dg%3D0/br%3D1/ichc%3D1/rs%3DACT90oGfmKqfpWjvOHAyqh3jJrTA7PIB2g/cb%3Dloaded_h_0?cb%3D121509378,_basecss:/xjs/_/ss/k%3Dxjs.s.YwhYbi2sNJA.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAAAAAAAACgAAAAAAIQAYEAEAEAAAAAAAAAAAACFHgAAADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAAAAgAIAEAAAAAAAAAABBAAACAAAAAACAAAAAAAAABAAgQBQAAAAAARQAAEAAAAAAQAAAAAAAAAAAAIECEAEAAAAAAACACAAAAAAAAAAAOAAAAAAAAAAAAAAAAABAAgAAAAAAAAAAAAAAAIIDAAAAAgBAMAIAAAAAAwAAAAACAAABAAAAAAAAAAAAgJAACQCAAAAAAACAAQAAAAAAAAAAAAAgABBCIQAgACgAAVcEAAAAwAGAAAAAAAAAQAMBCRAAAAAAAAAAAAAAAAIACAIQAggAAACAABAAAAAACAAAAACAGAAAAAAAAABAAAVAAAIAGEECACBRSAgQASAgAAAAAQAAAogAAAAAAFCAgAAAAAAAAAAAAAAgAgAAAAAAAAAAAAAAAAAAAAASAAALBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA/br%3D1/cb%3Dloaded_h_0/rs%3DACT90oFdArfxWplqqJI0K_scR9r6HJlmpw?cb%3D121509378,_basecomb:/xjs/_/js/k%3Dxjs.s.en_GB.GGQMHOMTvs0.2023.O/ck%3Dxjs.s.YwhYbi2sNJA.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAgIAQABACgBAAIAAIQAYEAEAEAAAAAAAAAAAACFHgACADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAEEAgBIAEAAAAAAAAAABBAAACACAAAACAAAAAgAEABAAgQJQAAAAAFRQAAEAAAAAAQAAAAAAAAAAAAIEKEAEAAIhAAACACAAA_jHmGwAAPAAAAAAAgAQAAAAAAABAAgAAAAAAAAAAAAAAJIIDAAAAAgBAMLIAAAAAI8AAAAACQAABEAAAAAAAAAAAgJAACQCAAAAAAACAAQAAAAAAAAAAAAAgABBCIQAgACgAAVcEAEAAwAGAAAAAAAAAQAMBCRAAAAAAACAAAAAAAAIACAIQAggAAACAABAAAEABCAAAAACAGAAAAAAAAABAIAVAAAIAGEECACBRSAgQASAgAECAAQAAAogAAAAAAFCAkPgBBAEIAAAAAAAgAgAAAAAAAAAAACQAAQAAAAASAAALBAAwAAAAAHIAPB6AQwQFAAAAAAAAAAAAAAAAAAAAAAAAAAAACIACmANJQQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABARXgKAAAAAAAAbA0ABA/d%3D1/ed%3D1/dg%3D0/br%3D1/ujg%3D1/ichc%3D1/rs%3DACT90oGGG3U4SW8_csRDkzeEU1SnIVD0XQ/cb%3Dloaded_h_0?cb%3D121509378,_fmt:madl,_id:B2Jtyd,_mado:ed&q=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India?&mlro=0a7eoxB7z87AeVLYkhBjQQ4sXN8p6ziJ0qdU8S_8nXzrAEVj3Mjtnt93-MclkHR3vltQsbjhIB9g7vldA3eTKoR3851SLa3Cf4qcjo4TvrmeW6XVANqUa1wHStVxqwZVZx4Na2G7UWXIjjai&mlros=Asbtj4gR1NY&madse=1&mrc=CAA4gANQAWgAcACYAQCgAUaoAQCwAQG6AQEB2AEA&sca_esv=cbebc86b742c5175&mgtyp=90&snr=1",
+     "total_time_taken": 6.45
+    },
+    "search_parameters": {
+     "engine": "google_ai_overview",
+     "page_token": "2VHeTXiczVXbkqJIEP2A_Y7lhVlBsb10BNFR0LTirUXb27wQUGABclGKFu23_Zf9qn3cL9kCRPHWPTMPG1sRUFRVZpJ5Kk-cP_9ybX_192__WFG0xo8ME8dxCQUBcs0SDDxGw3sfMsvAxSG0npDL2z6Fg_cQmrbBQysMPJOyXN70qf2W5yiIeZYybX5Re37WtsP4Ve2GcQMOH7RNRQNUGo1XdQ2bDvnZzsGMypDX6nfumSxKuGT6aksotVpKv_3af9titlRhK1zpldE8YgP-04FkoAABiOQB8l0rcij-SDRJIrYykAqeQjoVvBE5FpJJVtL1y_1ochpIto4BVKfttWIABsdYyl3vTnHRyya5n2VDvATpyuPTkSUgokNqX1re3kxLz0arcHoXeYn4FUskYElDRECVchd0_hulaJ_YxOlXWwZDoQaUWLkPd-IuA9EDg47yeYUg6YjRHHXzlQ5YssMYiPQvy-ghmcqMDS2YfoQ4aWvxrckGraXX3SzXM2f72gb7jcU5nfAN1IeyUEEM1ImdG2iGaaiWyj6l63Kl_MA2uXrjW0opiI-cwkVOLWJrodsVPOiAUq8klHM2iUVwi0gmu5Nb3ZOQIaleuHGW3KMMrptOFIOz5eFSSIcvJCCdYym-tJPjI8_Jxw6B9_OLzD0IS67YJOaZnDIGSBEOSY1Od3eWpiyJp0TEsyZ9vapSuOwr4i9nGSMB9HNI42MiZ2ChTtKI-R_ES7wQKUMk0KAUpymUslAnPiigL4ijy5zkBHvihbKYwjF6-j55JwfT1L4lEfqIwmhM4AHjQ0VJLsGhuBfxskx0VXc2xuTp3e6Ir4Zwo19uWeW0uWBBkT0vBgiXu9na3Ww6MttVMRw1w1q743rr-DZbAk__OQmC_zdK5QKFMoG6TynxRyhFBArdEKgDH7JmygVK6RwE6j6lumkiB4FKvHOBGh5MTgJ1TalOkVK9DFK5kRV0KVA_TSnpE0oduX-DUqT0W5SS71EqF6gCpVaXAlWs-yRQOaV-TaCUXxOolGFmNp2r1buD7qtWq8VNquNZQ4V49Lz6MKVJeezL02d2rnypWksvevQ0w_2m2sajUOlEe-ObSjaCR9OgNvzM0iJaC006skxaN3FEr7W9Z_oRjbTIjLU9HawjO_AxvQxCGkdaGL2vMa35Bj3uS5i2fVr2DVt7ojw3DHhWq5vBTqh_NOrAnPYWK0twFKWK54PGuvZhd9iNMWmM1YY__wiBNHW4vhP5UZP7ow_dVXvEbd1IwbpjyUIT1beuATjzrRuMuMZDedzTOHFZ3UAnqL5tQ8-c1eZTMNhMtHLcHkfT3Sb-Pv2-qw60Sqs-mc1lx9HsNCvMA6xHThWNyoMFRWrHJl-mvBDypHuqCAwUMEMAAnEBFNLAEy0gcwyUFmkISaiQq6Yw1FQTb3momzps1PR6tQIfyvUHykPRfs03WQr7IV_-F6qzYVw"
+    },
+    "ai_overview": {
+     "text_blocks": [
+      {
+       "type": "paragraph",
+       "snippet": "The best payment gateway options for startups and SMEs in India are Razorpay, Cashfree Payments, and PayU, offering comprehensive domestic coverage and robust developer tools.",
+       "snippet_highlighted_words": [
+        "Razorpay, Cashfree Payments, and PayU"
+       ]
+      },
+      {
+       "type": "heading",
+       "snippet": "📊 Comparison of Top Payment Gateways"
+      },
+      {
+       "type": "table",
+       "table": [
+        [
+         "Gateway",
+         "Best For",
+         "Standard Pricing",
+         "Key Advantages"
+        ],
+        [
+         "Razorpay",
+         "Full-stack tech & SaaS",
+         "~2% per transaction",
+         "Deep UPI/card support, business banking"
+        ],
+        [
+         "Cashfree Payments",
+         "High volumes & payouts",
+         "~1.95% per transaction",
+         "Fast payouts, 120+ payment modes"
+        ],
+        [
+         "Scaling domestic volume",
+         "Varies by volume",
+         "High success rates, EMI coverage"
+        ],
+        [
+         "No-code / Solo founders",
+         "Flat @ 2% + ₹3",
+         "Instant link payments"
+        ]
+       ],
+       "detailed": [
+        [
+         {
+          "snippet": "Gateway"
+         },
+         {
+          "snippet": "Best For"
+         },
+         {
+          "snippet": "Standard Pricing"
+         },
+         {
+          "snippet": "Key Advantages"
+         }
+        ],
+        [
+         {
+          "snippet": "Razorpay"
+         },
+         {
+          "snippet": "Full-stack tech & SaaS"
+         },
+         {
+          "snippet": "~2% per transaction"
+         },
+         {
+          "snippet": "Deep UPI/card support, business banking"
+         }
+        ],
+        [
+         {
+          "snippet": "Cashfree Payments"
+         },
+         {
+          "snippet": "High volumes & payouts"
+         },
+         {
+          "snippet": "~1.95% per transaction"
+         },
+         {
+          "snippet": "Fast payouts, 120+ payment modes"
+         }
+        ],
+        [
+         {
+          "snippet": "Scaling domestic volume"
+         },
+         {
+          "snippet": "Varies by volume"
+         },
+         {
+          "snippet": "High success rates, EMI coverage"
+         }
+        ],
+        [
+         {
+          "snippet": "No-code / Solo founders"
+         },
+         {
+          "snippet": "Flat @ 2% + ₹3"
+         },
+         {
+          "snippet": "Instant link payments"
+         }
+        ]
+       ],
+       "formatted": [
+        {
+         "gateway": "Razorpay",
+         "best_for": "Full-stack tech & SaaS",
+         "standard_pricing": "~2% per transaction",
+         "key_advantages": "Deep UPI/card support, business banking"
+        },
+        {
+         "gateway": "Cashfree Payments",
+         "best_for": "High volumes & payouts",
+         "standard_pricing": "~1.95% per transaction",
+         "key_advantages": "Fast payouts, 120+ payment modes"
+        },
+        {
+         "gateway": "Scaling domestic volume",
+         "best_for": "Varies by volume",
+         "standard_pricing": "High success rates, EMI coverage"
+        },
+        {
+         "gateway": "No-code / Solo founders",
+         "best_for": "Flat @ 2% + ₹3",
+         "standard_pricing": "Instant link payments"
+        }
+       ]
+      },
+      {
+       "type": "heading",
+       "snippet": "✅ Selection Guide by Business Model"
+      },
+      {
+       "type": "list",
+       "list": [
+        {
+         "snippet": "D2C Brands: Choose Cashfree Payments for optimal order volume handling and quick refunds.",
+         "reference_indexes": [
+          0,
+          1
+         ]
+        },
+        {
+         "snippet": "SaaS Startups: Choose Razorpay or Easebuzz for recurring automated subscription management.",
+         "reference_indexes": [
+          1,
+          2,
+          3
+         ]
+        },
+        {
+         "snippet": "Freelancers & Exporters: Choose PayPal India for seamless cross-border client invoicing."
+        }
+       ],
+       "reference_indexes": [
+        1,
+        4
+       ]
+      },
+      {
+       "type": "paragraph",
+       "snippet": "If you share your business model (e.g., e-commerce, SaaS, services) and estimated monthly transaction volume, I can recommend the most cost-effective gateway for your specific setup."
+      }
+     ],
+     "references": [
+      {
+       "index": 0,
+       "title": "5 Payment Gateways for Small Businesses in India",
+       "link": "https://contentmediasolution.com/business/5-payment-gateways-for-small-businesses-in-india/",
+       "snippet": "To guide further, below are the top 5 payment gateway providers in India you can opt for your business. * Cashfree Payments Cashfree Payments is a reliable payment...",
+       "source": "Content Media Solution",
+       "source_icon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://contentmediasolution.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL"
+      },
+      {
+       "index": 1,
+       "title": "Best Payment Gateway With Lowest Transaction Fees In India 2026",
+       "link": "https://businessconnectindia.in/best-payment-gateway-lowest-transaction/",
+       "snippet": "Table_title: Which Payment Gateway Should You Choose? Table_content: | If You Are… | Consider | | A D2C brand with growing order volumes | Cashfree Payments | | A ...",
+       "source": "Business Connect India",
+       "source_icon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://businessconnectindia.in&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS8m1k7NwQ8rHbJVJ-cPE8eqQerV7oOdCSCwHAPeGegq8WCkffTSQQp3-2l554xe8gCSem5Upy5CdjuFsmy3L0YAwo5OQfnHxB7xvus"
+      },
+      {
+       "index": 2,
+       "title": "Best Payment Gateways for Small Businesses",
+       "link": "https://www.passionateinmarketing.com/best-payment-gateways-for-small-businesses/",
+       "snippet": "To assist with this decision-making process, we've curated a list of top payment gateways tailored to suit a diverse range of business types. * Razorpay Razorpay i...",
+       "source": "Passionate In Marketing",
+       "source_icon": "https://encrypted-tbn3.gstatic.com/faviconV2?url=https://www.passionateinmarketing.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSrz0DF8ZTQoSJFlttjk0DvVMNTo20z1JIuyY2K31shN3CGQcJxyzPo563nmdB1YOp8ZMbeHx8s2G2yrgqScag0PO8Iw_9OyGlDOoaS"
+      },
+      {
+       "index": 3,
+       "title": "Top Payment Gateways India 2026: Fees, UPI, ROI for SMBs",
+       "link": "https://sonupandey.com/payment-gateways-in-india/",
+       "snippet": "CCAvenue is one of South Asia's oldest and most reliable payment gateways, serving businesses across India, UAE, Saudi Arabia, Nepal, Maldives, and Singapore. ( Di...",
+       "source": "sonupandey.com",
+       "source_icon": "https://encrypted-tbn2.gstatic.com/faviconV2?url=https://sonupandey.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSUiVjp0vgM0AdVQRp6L8_3SEp33hL3rdUH7BDQqZrsiZdMGXbZFdtXxZKDzx22zuhuFeRrAjtUWpfiZKihZtm9d58e"
+      },
+      {
+       "index": 4,
+       "title": "Cashing in: 7 payment gateways for small businesses",
+       "link": "https://m.economictimes.com/small-biz/money/cashing-in-7-payment-gateways-for-small-businesses/articleshow/69172234.cms",
+       "snippet": "Cashing in: 7 payment gateways for small businesses * Features Embed payment buttons Direct link sharing options Visual charts of payments Offer free tools for sma...",
+       "source": "The Economic Times",
+       "source_icon": "https://encrypted-tbn3.gstatic.com/faviconV2?url=https://m.economictimes.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTJpLKAEZzSThsp2toG4gxE0HnfXjgKpbhsKV9z5THmVtqG9JnCYx0e82zHg5NHSzlSYCleHqaHb9ZNyhXQXzquotM"
+      },
+      {
+       "index": 5,
+       "title": "Best Payment Gateways for Small Businesses",
+       "link": "https://www.apnnews.com/best-payment-gateways-for-small-businesses/",
+       "snippet": "To assist with this decision-making process, we've curated a list of top payment gateways tailored to suit a diverse range of business types. * Razorpay Razorpay i...",
+       "source": "APN News",
+       "source_icon": "https://encrypted-tbn3.gstatic.com/faviconV2?url=https://www.apnnews.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL"
+      }
+     ]
+    }
+   }
+  ],
+  [
+   {
+    "search_metadata": {
+     "id": "6ac3a02eaf5fdcaa27ba0e69",
+     "status": "Success",
+     "created_at": "2026-10-05 13:03:42 UTC",
+     "processed_at": "2026-10-05 13:03:42 UTC",
+     "google_url": "https://www.google.com/search?q=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India%3F&oq=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India%3F&hl=en&gl=in&sourceid=chrome&ie=UTF-8",
+     "total_time_taken": 0.45
+    },
+    "search_parameters": {
+     "engine": "google",
+     "q": "What are the best payment gateway options for startups and SMEs in India?",
+     "google_domain": "google.com",
+     "hl": "en",
+     "gl": "in",
+     "device": "desktop"
+    },
+    "ai_overview": {
+     "page_token": "QBZ_zHiczZXbcqpKEIYfYD_H5oZEEeMhqaJSAyKCRxITY24oDuOAcjAMinq33mU_1XqaPYAoGk3WWhe7NlU6zEz30N3TX_0__nEdf_Hzr592FC3xQ7kcx3EJBQFyYckMvLKOt75ZngUuDk370XY56FM4WIUmdCzOtMPAgxRyOcentmuuSpmYYyjocL16q6Wv1hNgsfIyUkeVcC0h0KTS4zjN0DGck69t5rislcnf4u9qi0xKuAR9TeJLkqT2O8P-eI2ZEsuw1dKwrHvEBvynD5KBCnggkB-Qr1qRTeFXThNFYisDseDJp0PBG5FtPhlkNZ23r58mpwfJ9uEAbd7xpBiAweEs9aq3Upz0skHuZ9EQL1785PHlkwUgoH1o31peXkxTzx6psHu18iLxK6ZIiiWOECmqmLug08-oRfvEJk7fOjIY8XWgxur1cifuMhA8MFDUrzMESUc8vaFuPjMAQ1bKFiL9y5SNkAyVsmPaZvoS4qSthfE9E0gzr_sxW07m62EHbD_s6lwJx6AxknkWlU2D2LmBbkFLszXmMZ1X2EqNua82mjcpUiY-MIWLTE1je2o4LB4ooNQr8ZWcJqFY3GIlk9WXS92TwJBkz1_YS-5RBp-bThCCk-n-UkiHT0UgntZSaHeS7QPn5GWDwOr0InMPQsknmoQ8kmPExI7fB_V0vLuTMGVROAYinDTp8FOW_HlfEX85ixjxoJ-XND4EclIspCSNmH9BOK8XiZUXSGlQWqdXU8yOOvKggj4vPJ3HJCe1J17oJPc9lgXvJJTX1F4SCT4C__QMkAqe9xklsQT75NrCeZqosFAs0TP59S53xHcPf6FfLlnl2JxRUKSnPeZHt0voKwMVm-Gis_Xi0F12nQYO0GVaAs_4PQky_29I5QKFMoG6jpTwK0gRgUIXBGrPQ3bjB4FS9gJ1HaluGsheoBLvXKBGe5OjQH1GSiki1ctKKjezhM4F6reREr9A6tDYF5AiqV9CSr6GVC5QBaQW5wJVROooUDlSfyZQ6p8JVEoYzIZTtVrN0VXVEiu7UUdRmy-3HrxXIN-cq9Wn7qTnmWvwrWrNvOjB0y33RnOsB55Voq11o5GF4AFa1Ac3sfWI1kNIRzakDYgjeqlvPehHNNIjGOtbOlhGTuBjehaENI70MFotMa37Fv3cFzHt-LTsW47-SHluGHCMfjfwB_7Y2IjtZV8bvzTvW-NwHA979QkyxEl_OmDC3dsHb1SUxVRmW0sBscrgbsVMR069H7cReytBf1tds7fR9HUxC7fVXe1Vg4707qq7prgbh05LaUqbptaL4-6iNmlvXt8DuJJ23Td313iHtfpznAaDOXO6EefhW8c3XiiSMoZchfJCkyNNcxfGhKsJAiYQpkAlffuiB2SMgSqRPhB5ltwwhU1dg3jNmQY0zGbdaNyxZq3SqFEeirZL7p6hsB9ylX8BIf1fPw",
+     "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=QBZ_zHiczZXbcqpKEIYfYD_H5oZEEeMhqaJSAyKCRxITY24oDuOAcjAMinq33mU_1XqaPYAoGk3WWhe7NlU6zEz30N3TX_0__nEdf_Hzr592FC3xQ7kcx3EJBQFyYckMvLKOt75ZngUuDk370XY56FM4WIUmdCzOtMPAgxRyOcentmuuSpmYYyjocL16q6Wv1hNgsfIyUkeVcC0h0KTS4zjN0DGck69t5rislcnf4u9qi0xKuAR9TeJLkqT2O8P-eI2ZEsuw1dKwrHvEBvynD5KBCnggkB-Qr1qRTeFXThNFYisDseDJp0PBG5FtPhlkNZ23r58mpwfJ9uEAbd7xpBiAweEs9aq3Upz0skHuZ9EQL1785PHlkwUgoH1o31peXkxTzx6psHu18iLxK6ZIiiWOECmqmLug08-oRfvEJk7fOjIY8XWgxur1cifuMhA8MFDUrzMESUc8vaFuPjMAQ1bKFiL9y5SNkAyVsmPaZvoS4qSthfE9E0gzr_sxW07m62EHbD_s6lwJx6AxknkWlU2D2LmBbkFLszXmMZ1X2EqNua82mjcpUiY-MIWLTE1je2o4LB4ooNQr8ZWcJqFY3GIlk9WXS92TwJBkz1_YS-5RBp-bThCCk-n-UkiHT0UgntZSaHeS7QPn5GWDwOr0InMPQsknmoQ8kmPExI7fB_V0vLuTMGVROAYinDTp8FOW_HlfEX85ixjxoJ-XND4EclIspCSNmH9BOK8XiZUXSGlQWqdXU8yOOvKggj4vPJ3HJCe1J17oJPc9lgXvJJTX1F4SCT4C__QMkAqe9xklsQT75NrCeZqosFAs0TP59S53xHcPf6FfLlnl2JxRUKSnPeZHt0voKwMVm-Gis_Xi0F12nQYO0GVaAs_4PQky_29I5QKFMoG6jpTwK0gRgUIXBGrPQ3bjB4FS9gJ1HaluGsheoBLvXKBGe5OjQH1GSiki1ctKKjezhM4F6reREr9A6tDYF5AiqV9CSr6GVC5QBaQW5wJVROooUDlSfyZQ6p8JVEoYzIZTtVrN0VXVEiu7UUdRmy-3HrxXIN-cq9Wn7qTnmWvwrWrNvOjB0y33RnOsB55Voq11o5GF4AFa1Ac3sfWI1kNIRzakDYgjeqlvPehHNNIjGOtbOlhGTuBjehaENI70MFotMa37Fv3cFzHt-LTsW47-SHluGHCMfjfwB_7Y2IjtZV8bvzTvW-NwHA979QkyxEl_OmDC3dsHb1SUxVRmW0sBscrgbsVMR069H7cReytBf1tds7fR9HUxC7fVXe1Vg4707qq7prgbh05LaUqbptaL4-6iNmlvXt8DuJJ23Td313iHtfpznAaDOXO6EefhW8c3XiiSMoZchfJCkyNNcxfGhKsJAiYQpkAlffuiB2SMgSqRPhB5ltwwhU1dg3jNmQY0zGbdaNyxZq3SqFEeirZL7p6hsB9ylX8BIf1fPw"
+    }
+   },
+   {
+    "search_metadata": {
+     "id": "6ac3a02f1bd4f02aeb5cd385",
+     "status": "Success",
+     "created_at": "2026-10-05 13:03:43 UTC",
+     "processed_at": "2026-10-05 13:03:43 UTC",
+     "google_ai_overview_url": "https://www.google.com/async/folsrch?hl=en&sourceid=chrome&gl=in&yv=3&cs=0&ei=L6DDauvWAd2IptQP1rvGgA8&async=_basejs:/xjs/_/js/k%3Dxjs.s.en_GB.GGQMHOMTvs0.2023.O/am%3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgIAQABACABAAIAAAAAAAAAAAAAAAAAAAAAAAAABAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEEAABIAEAAAAAAAAAABBAAAAACAAAAAAAAAAgAEABAAgAIQAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAEIEAAAAIhAAACAAAAA_jHmGwAANAAAAAAAgAQAAAAAAAAAAAAAAAAAAAAAAAAAJAAAAAAAAAAAALAAAAAAIMAAAAACQAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAACgAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAACAAAAAAEABAAAAAAAAGAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAAECAAQAAAAAAAAAAAFAAEPgBBAEIAAAAAAAgAAAAAAAAAAAAACQAAQAAAAAAAAAIAAAwAAAAAHIAPB6AQwQFAAAAAAAAAAAAAAAAAAAAAAAAAAAACIACmANJQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABARXgKAAAAAAAAbA0ABA/dg%3D0/br%3D1/ichc%3D1/rs%3DACT90oGfmKqfpWjvOHAyqh3jJrTA7PIB2g/cb%3Dloaded_h_0?cb%3D121509378,_basecss:/xjs/_/ss/k%3Dxjs.s.YwhYbi2sNJA.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAAAAAAAACgAAAAAAIQAYEAEAEAAAAAAAAAAAACFHgAAADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAAAAgAIAEAAAAAAAAAABBAAACAAAAAACAAAAAAAAABAAgABQAAAAAARQAAEAAAAAAQAAAAAAAAAAAAIECEAEAAAAAAACACAAAAAAAAAAAOAAAAAAAAAAAAAAAAABAAgAAAAAAAAAAAAAAAIIDAAAAAgBAMAIAAAAAAwAAAAACAAABAAAAAAAAAAAAgJAACQCAAAAAAACAAQAAAAAAAAAAAAAgABBCIQAgACgAAVcEAAAAwAGAAAAAAAAAQAMBCRAAAAAAAAAAAAAAAAIACAIQAggAAACAAAAAAAAACAAAAACAGAAAAAAAAABAAAVAAAIAGEECACBRSAgQASAgAAAAAQAAAogAAAAAAFCAgAAAAAAAAAAAAAAgAgAAAAAAAAACAAAAAAAAAAASAAALBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABA/br%3D1/cb%3Dloaded_h_0/rs%3DACT90oFTBP-penJNQscrkHymwrlpKi7sog?cb%3D121509378,_basecomb:/xjs/_/js/k%3Dxjs.s.en_GB.GGQMHOMTvs0.2023.O/ck%3Dxjs.s.YwhYbi2sNJA.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAgIAQABACgBAAIAAIQAYEAEAEAAAAAAAAAAAACFHgACADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAEEAgBIAEAAAAAAAAAABBAAACACAAAACAAAAAgAEABAAgAJQAAAAAFRQAAEAAAAAAQAAAAAAAAAAAAIEKEAEAAIhAAACACAAA_jHmGwAAPAAAAAAAgAQAAAAAAABAAgAAAAAAAAAAAAAAJIIDAAAAAgBAMLIAAAAAI8AAAAACQAABEAAAAAAAAAAAgJAACQCAAAAAAACAAQAAAAAAAAAAAAAgABBCIQAgACgAAVcEAEAAwAGAAAAAAAAAQAMBCRAAAAAAACAAAAAAAAIACAIQAggAAACAAAAAAEABCAAAAACAGAAAAAAAAABAIAVAAAIAGEECACBRSAgQASAgAECAAQAAAogAAAAAAFCAkPgBBAEIAAAAAAAgAgAAAAAAAAACACQAAQAAAAASAAALBAAwAAAAAHIAPB6AQwQFAAAAAAAAAAAAAAAAAAAAAAAAAAAACIACmANJQQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABARXgKAAAAAAAAbA0ABA/d%3D1/ed%3D1/dg%3D0/br%3D1/ujg%3D1/ichc%3D1/rs%3DACT90oE1zPHJQ8U-me9JeB8jQ3RKWLmcvA/cb%3Dloaded_h_0?cb%3D121509378,_fmt:madl,_id:B2Jtyd,_mado:ed&q=What+are+the+best+payment+gateway+options+for+startups+and+SMEs+in+India?&mlro=0a4NnNnTbxEFpM_TU89DTrTwOL6WgbEWMYN0rzXqBb1JkYI2DpCg2JN4u0YPi6MwFg2-Geny3v2-tYVkfry3z5V_eiGZlQz8EzTriDJ8Gx8_LwwKk5WFxVZoeuGzKXlz7Ze56Sw&mlros=cYxEjrXHnbU&madse=1&mrc=CAA4rwRQAWgAcACYAQCgAUaoAQCwAQG6AQEB2AEA&sca_esv=cbebc86b742c5175&mgtyp=90&snr=1",
+     "total_time_taken": 16.08
+    },
+    "search_parameters": {
+     "engine": "google_ai_overview",
+     "page_token": "QBZ_zHiczZXbcqpKEIYfYD_H5oZEEeMhqaJSAyKCRxITY24oDuOAcjAMinq33mU_1XqaPYAoGk3WWhe7NlU6zEz30N3TX_0__nEdf_Hzr592FC3xQ7kcx3EJBQFyYckMvLKOt75ZngUuDk370XY56FM4WIUmdCzOtMPAgxRyOcentmuuSpmYYyjocL16q6Wv1hNgsfIyUkeVcC0h0KTS4zjN0DGck69t5rislcnf4u9qi0xKuAR9TeJLkqT2O8P-eI2ZEsuw1dKwrHvEBvynD5KBCnggkB-Qr1qRTeFXThNFYisDseDJp0PBG5FtPhlkNZ23r58mpwfJ9uEAbd7xpBiAweEs9aq3Upz0skHuZ9EQL1785PHlkwUgoH1o31peXkxTzx6psHu18iLxK6ZIiiWOECmqmLug08-oRfvEJk7fOjIY8XWgxur1cifuMhA8MFDUrzMESUc8vaFuPjMAQ1bKFiL9y5SNkAyVsmPaZvoS4qSthfE9E0gzr_sxW07m62EHbD_s6lwJx6AxknkWlU2D2LmBbkFLszXmMZ1X2EqNua82mjcpUiY-MIWLTE1je2o4LB4ooNQr8ZWcJqFY3GIlk9WXS92TwJBkz1_YS-5RBp-bThCCk-n-UkiHT0UgntZSaHeS7QPn5GWDwOr0InMPQsknmoQ8kmPExI7fB_V0vLuTMGVROAYinDTp8FOW_HlfEX85ixjxoJ-XND4EclIspCSNmH9BOK8XiZUXSGlQWqdXU8yOOvKggj4vPJ3HJCe1J17oJPc9lgXvJJTX1F4SCT4C__QMkAqe9xklsQT75NrCeZqosFAs0TP59S53xHcPf6FfLlnl2JxRUKSnPeZHt0voKwMVm-Gis_Xi0F12nQYO0GVaAs_4PQky_29I5QKFMoG6jpTwK0gRgUIXBGrPQ3bjB4FS9gJ1HaluGsheoBLvXKBGe5OjQH1GSiki1ctKKjezhM4F6reREr9A6tDYF5AiqV9CSr6GVC5QBaQW5wJVROooUDlSfyZQ6p8JVEoYzIZTtVrN0VXVEiu7UUdRmy-3HrxXIN-cq9Wn7qTnmWvwrWrNvOjB0y33RnOsB55Voq11o5GF4AFa1Ac3sfWI1kNIRzakDYgjeqlvPehHNNIjGOtbOlhGTuBjehaENI70MFotMa37Fv3cFzHt-LTsW47-SHluGHCMfjfwB_7Y2IjtZV8bvzTvW-NwHA979QkyxEl_OmDC3dsHb1SUxVRmW0sBscrgbsVMR069H7cReytBf1tds7fR9HUxC7fVXe1Vg4707qq7prgbh05LaUqbptaL4-6iNmlvXt8DuJJ23Td313iHtfpznAaDOXO6EefhW8c3XiiSMoZchfJCkyNNcxfGhKsJAiYQpkAlffuiB2SMgSqRPhB5ltwwhU1dg3jNmQY0zGbdaNyxZq3SqFEeirZL7p6hsB9ylX8BIf1fPw"
+    },
+    "ai_overview": {
+     "text_blocks": [
+      {
+       "type": "paragraph",
+       "snippet": "Razorpay is the top overall payment gateway for startups and SMEs in India due to its comprehensive full-stack financial services, deep UPI integration, and developer-friendly tools.",
+       "snippet_links": [
+        {
+         "text": "Razorpay",
+         "link": "https://razorpay.com"
+        }
+       ],
+       "snippet_highlighted_words": [
+        "Razorpay"
+       ],
+       "reference_indexes": [
+        0
+       ]
+      },
+      {
+       "type": "heading",
+       "snippet": "📊 Top Payment Gateway Options Comparison"
+      },
+      {
+       "type": "table",
+       "table": [
+        [
+         "Feature / Business Need",
+         "✅ Top Recommendation",
+         "💡 Key Strengths",
+         "⚠️ Pricing / Considerations"
+        ],
+        [
+         "All-Round & Tech Startups",
+         "Deep UPI/card support, business banking",
+         "~2%-3% per transaction"
+        ],
+        [
+         "High-Volume & D2C Brands",
+         "Cashfree Payments",
+         "Advanced payout features, 120+ payment modes",
+         "Competitive domestic rates"
+        ],
+        [
+         "Budget & Micro-SMEs",
+         "PayKun",
+         "Flat 1.75% fee, zero setup or maintenance cost",
+         "Monitor server reliability closely"
+        ],
+        [
+         "Global SaaS & Cross-Border",
+         "Excellent developer toolkit for international collections",
+         "Higher per-transaction costs for foreign cards"
+        ],
+        [
+         "Multilingual & Traditional",
+         "Supports 18+ languages, zero setup fee option",
+         "Annual maintenance fee applies for startups"
+        ]
+       ],
+       "detailed": [
+        [
+         {
+          "snippet": "Feature / Business Need"
+         },
+         {
+          "snippet": "✅ Top Recommendation"
+         },
+         {
+          "snippet": "💡 Key Strengths"
+         },
+         {
+          "snippet": "⚠️ Pricing / Considerations"
+         }
+        ],
+        [
+         {
+          "snippet": "All-Round & Tech Startups"
+         },
+         {
+          "snippet": "Deep UPI/card support, business banking"
+         },
+         {
+          "snippet": "~2%-3% per transaction"
+         }
+        ],
+        [
+         {
+          "snippet": "High-Volume & D2C Brands"
+         },
+         {
+          "snippet": "Cashfree Payments"
+         },
+         {
+          "snippet": "Advanced payout features, 120+ payment modes"
+         },
+         {
+          "snippet": "Competitive domestic rates"
+         }
+        ],
+        [
+         {
+          "snippet": "Budget & Micro-SMEs"
+         },
+         {
+          "snippet": "PayKun"
+         },
+         {
+          "snippet": "Flat 1.75% fee, zero setup or maintenance cost"
+         },
+         {
+          "snippet": "Monitor server reliability closely"
+         }
+        ],
+        [
+         {
+          "snippet": "Global SaaS & Cross-Border"
+         },
+         {
+          "snippet": "Excellent developer toolkit for international collections"
+         },
+         {
+          "snippet": "Higher per-transaction costs for foreign cards"
+         }
+        ],
+        [
+         {
+          "snippet": "Multilingual & Traditional"
+         },
+         {
+          "snippet": "Supports 18+ languages, zero setup fee option"
+         },
+         {
+          "snippet": "Annual maintenance fee applies for startups"
+         }
+        ]
+       ],
+       "formatted": [
+        {
+         "feature_business_need": "All-Round & Tech Startups",
+         "✅_top_recommendation": "Deep UPI/card support, business banking",
+         "💡_key_strengths": "~2%-3% per transaction"
+        },
+        {
+         "feature_business_need": "High-Volume & D2C Brands",
+         "✅_top_recommendation": "Cashfree Payments",
+         "💡_key_strengths": "Advanced payout features, 120+ payment modes",
+         "⚠️_pricing_considerations": "Competitive domestic rates"
+        },
+        {
+         "feature_business_need": "Budget & Micro-SMEs",
+         "✅_top_recommendation": "PayKun",
+         "💡_key_strengths": "Flat 1.75% fee, zero setup or maintenance cost",
+         "⚠️_pricing_considerations": "Monitor server reliability closely"
+        },
+        {
+         "feature_business_need": "Global SaaS & Cross-Border",
+         "✅_top_recommendation": "Excellent developer toolkit for international collections",
+         "💡_key_strengths": "Higher per-transaction costs for foreign cards"
+        },
+        {
+         "feature_business_need": "Multilingual & Traditional",
+         "✅_top_recommendation": "Supports 18+ languages, zero setup fee option",
+         "💡_key_strengths": "Annual maintenance fee applies for startups"
+        }
+       ]
+      },
+      {
+       "type": "paragraph",
+       "snippet": "To help narrow down the best choice for your specific venture, please share:"
+      },
+      {
+       "type": "list",
+       "list": [
+        {
+         "snippet": "Your business model (e.g., E-commerce, B2B SaaS, Freelance/Services)",
+         "reference_indexes": [
+          1
+         ]
+        },
+        {
+         "snippet": "Expected monthly transaction volume or ticket size"
+        },
+        {
+         "snippet": "Whether you primarily serve domestic or international clients"
+        }
+       ],
+       "reference_indexes": [
+        1
+       ]
+      }
+     ],
+     "references": [
+      {
+       "index": 0,
+       "title": "Best Payment Gateways for Small Businesses",
+       "link": "https://www.passionateinmarketing.com/best-payment-gateways-for-small-businesses/",
+       "snippet": "To assist with this decision-making process, we've curated a list of top payment gateways tailored to suit a diverse range of business types. * Razorpay Razorpay i...",
+       "source": "Passionate In Marketing",
+       "source_icon": "https://encrypted-tbn3.gstatic.com/faviconV2?url=https://www.passionateinmarketing.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSrz0DF8ZTQoSJFlttjk0DvVMNTo20z1JIuyY2K31shN3CGQcJxyzPo563nmdB1YOp8ZMbeHx8s2G2yrgqScag0PO8Iw_9OyGlDOoaS"
+      },
+      {
+       "index": 1,
+       "title": "Best Payment Gateway With Lowest Transaction Fees In India 2026",
+       "link": "https://businessconnectindia.in/best-payment-gateway-lowest-transaction/",
+       "snippet": "Table_title: Which Payment Gateway Should You Choose? Table_content: | If You Are… | Consider | | A D2C brand with growing order volumes | Cashfree Payments | | A ...",
+       "source": "Business Connect India",
+       "source_icon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://businessconnectindia.in&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS8m1k7NwQ8rHbJVJ-cPE8eqQerV7oOdCSCwHAPeGegq8WCkffTSQQp3-2l554xe8gCSem5Upy5CdjuFsmy3L0YAwo5OQfnHxB7xvus"
+      },
+      {
+       "index": 2,
+       "title": "Cashing in: 7 payment gateways for small businesses",
+       "link": "https://m.economictimes.com/small-biz/money/cashing-in-7-payment-gateways-for-small-businesses/articleshow/69172234.cms",
+       "snippet": "Cashing in: 7 payment gateways for small businesses * Payment Options Available In India * 1. RazorPay It is a payment solution allowing businesses to accept, proc...",
+       "source": "The Economic Times",
+       "source_icon": "https://encrypted-tbn3.gstatic.com/faviconV2?url=https://m.economictimes.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSVQS8O7pbXkOZtqlSWk-8bKjBNr7v-FJeisQ9y5AK3aBHmqUHIFcn45c4QgwpSCWQOfijWixjXMNl02zo"
+      },
+      {
+       "index": 3,
+       "title": "Top Payment Gateways India 2026: Fees, UPI, ROI for SMBs",
+       "link": "https://sonupandey.com/payment-gateways-in-india/",
+       "snippet": "CCAvenue is one of South Asia's oldest and most reliable payment gateways, serving businesses across India, UAE, Saudi Arabia, Nepal, Maldives, and Singapore. ( Di...",
+       "source": "sonupandey.com",
+       "source_icon": "https://encrypted-tbn2.gstatic.com/faviconV2?url=https://sonupandey.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+       "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQZyq-46f8eXQaPTaM4MMg3Q1VC-uKl-cN2Wn18LmmdnsNJdGDyZz2sjfoGkKxmO0SugKOSZ0PLfxW00m4"
+      },
+      {
+       "index": 4,
+       "title": "5 Payment Gateways for Small Businesses in India",
+       "link": "https://contentmediasolution.com/business/5-payment-gateways-for-small-businesses-in-india/",
+       "snippet": "To guide further, below are the top 5 payment gateway providers in India you can opt for your business. * Cashfree Payments Cashfree Payments is a reliable payment...",
+       "source": "Content Media Solution",
+       "source_icon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://contentmediasolution.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL"
+      }
+     ]
+    }
+   }
+  ]
+ ]
+}

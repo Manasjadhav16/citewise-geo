@@ -25,7 +25,15 @@ class Stage1Config:
     classification_batch_size: int = 25  # domains per categorisation call
     fetcher: str = "gemini_grounding"
     grounding_model: str = "gemini-2.5-flash"
+    # serpapi_aio fetcher: fixed for the whole run
+    serpapi_gl: str = "in"
+    serpapi_hl: str = "en"
+    serpapi_device: str = "desktop"
     source_categories: Tuple[str, ...] = load_source_categories("")
+
+    @property
+    def serpapi_settings(self) -> dict:
+        return {"gl": self.serpapi_gl, "hl": self.serpapi_hl, "device": self.serpapi_device}
 
     @property
     def max_sources_per_query(self) -> int:
@@ -47,6 +55,9 @@ class Stage1Config:
             classification_batch_size=_env_int("STAGE1_CLASSIFICATION_BATCH_SIZE", cls.classification_batch_size),
             fetcher=os.getenv("STAGE1_FETCHER", cls.fetcher),
             grounding_model=os.getenv("STAGE1_GROUNDING_MODEL", cls.grounding_model),
+            serpapi_gl=os.getenv("STAGE1_SERPAPI_GL", cls.serpapi_gl),
+            serpapi_hl=os.getenv("STAGE1_SERPAPI_HL", cls.serpapi_hl),
+            serpapi_device=os.getenv("STAGE1_SERPAPI_DEVICE", cls.serpapi_device),
             source_categories=load_source_categories(),
         )
         # Per-run overrides from the API request (e.g. a smaller N for a quick run)
@@ -70,5 +81,9 @@ class Stage1Config:
         ):
             if getattr(self, name) < 1:
                 raise ValueError(f"Stage 1 config: {name} must be >= 1")
+        if self.fetcher not in ("gemini_grounding", "serpapi_aio"):
+            raise ValueError(f"Stage 1 config: unknown fetcher {self.fetcher!r}")
+        if self.serpapi_device not in ("desktop", "mobile", "tablet"):
+            raise ValueError("Stage 1 config: serpapi_device must be desktop, mobile or tablet")
         if self.min_source_tokens > self.per_source_token_cap:
             raise ValueError("Stage 1 config: min_source_tokens cannot exceed per_source_token_cap")
