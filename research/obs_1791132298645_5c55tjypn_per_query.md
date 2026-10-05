@@ -4,17 +4,28 @@
 - **Observed:** 2026-10-04T16:44:58.789Z
 - **Fetcher:** `gemini_grounding`
 - **Data source:** Observed via Gemini with Google Search grounding: an approximate proxy for Google AI Overview citations, not real AI Overview data.
+- **Evidence extraction:** n/a (not recorded)
 - **Runs:** 9/9 succeeded (3 per query)
 
 All values are stored values from the observation; nothing is estimated. `n/a` means the value was not stored or cannot be computed (e.g. Jaccard needs at least 2 successful runs). Rates and positions are over the successful runs shown in *Runs*. Citation counts include web sources only (search-engine utility results are excluded), and each citation's category is the stored label of its domain. Full precision is in the accompanying CSV.
 
 ## Summary
 
-| # | Query | Runs (ok/attempted) | Unique sources (domains) | Mean Jaccard, URLs / domains | Mention % | Cited % | Citation position, mean / median | Analyzed page cited? |
-|---|---|---|---|---|---|---|---|---|
-| 1 | What are the best payment gateway options for startups and SMEs in India? | 3/3 | 40 (31) | 0.238 / 0.326 | 100 | 66.7 | 4.50 / 4.50 | no |
-| 2 | Which payment gateway has the highest success rate in India for UPI and RuPay cards? | 3/3 | 26 (25) | 0.302 / 0.267 | 100 | 100 | 2 / 1 | no |
-| 3 | What are the standard MDR charges and transaction fees for payment gateways in India? | 3/3 | 24 (22) | 0.258 / 0.334 | 0 | 100 | 4.67 / 3 | no |
+| # | Query | Runs (ok/attempted) | Unique sources (domains) | Mean Jaccard, URLs / domains | Mention % | Mention % excl. absence | Cited % | Citation position, mean / median | Analyzed page cited? |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | What are the best payment gateway options for startups and SMEs in India? | 3/3 | 40 (31) | 0.238 / 0.326 | 100 | n/a | 66.7 | 4.50 / 4.50 | no |
+| 2 | Which payment gateway has the highest success rate in India for UPI and RuPay cards? | 3/3 | 26 (25) | 0.302 / 0.267 | 100 | n/a | 100 | 2 / 1 | no |
+| 3 | What are the standard MDR charges and transaction fees for payment gateways in India? | 3/3 | 24 (22) | 0.258 / 0.334 | 0 | n/a | 100 | 4.67 / 3 | no |
+
+## Mentions and absence-of-information sentences
+
+*Mention %* is the string match of the brand name or domain anywhere in the answer. *Mention % excl. absence* counts a run only if at least one sentence containing a brand term is not an absence-of-information statement (e.g. "no mention of", "does not contain information about", "cannot find"); ordinary negation such as "does not charge setup fees" is still a mention. Both are over the same runs. Below are every brand-term sentence classified as an absence statement, for manual checking. `n/a`: not stored for this observation (the field was added on 2026-10-06).
+
+| # | Runs mentioned | Runs mentioned excl. absence | Absence-of-information sentences |
+|---|---|---|---|
+| 1 | 3/3 | n/a | n/a |
+| 2 | 3/3 | n/a | n/a |
+| 3 | 0/3 | n/a | n/a |
 
 ## Category counts
 

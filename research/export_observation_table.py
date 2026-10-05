@@ -49,6 +49,7 @@ def main():
     taxonomy = (obs.get("config") or {}).get("source_categories") or sorted(set(domain_category.values()))
     # Real AI Overview data (serpapi_aio) has activation, parse errors, credits and inline links
     is_aio = obs.get("fetcher") == "serpapi_aio"
+    evidence_skipped = obs.get("evidenceSkipped")  # None for observations made before the option existed
 
     rows = []
     for q in obs["queries"]:
@@ -82,6 +83,8 @@ def main():
             "mean_pairwise_jaccard_urls": q["sourceSetStability"],
             "mean_pairwise_jaccard_domains": q["domainSetStability"],
             "mention_pct": q["mentionRate"],
+            # Mentions excluding absence-of-information statements (not stored before 2026-10-06: n/a)
+            "mention_excl_absence_pct": q.get("mentionRateExclAbsence"),
             "cited_pct": q["citationRate"],
             "mean_citation_position": q["meanCitationPosition"],
             "median_citation_position": q["medianCitationPosition"],
@@ -115,6 +118,22 @@ def main():
             for url, runs in sorted(target_urls.items(), key=lambda kv: (-len(kv[1]), kv[0]))
         ) or "none"
         row["analyzed_page_cited"] = "YES" if any(canonical_url(u) == analyzed_key for u in target_urls) else "no"
+
+        # Both mention fields per run, and every absence-of-information sentence (for manual checking)
+        stored_excl = [r.get("targetMentionedExclAbsence") for r in ok_runs]
+        row["runs_mentioned"] = sum(1 for r in ok_runs if r.get("targetMentioned"))
+        row["runs_mentioned_excl_absence"] = None if any(v is None for v in stored_excl) else sum(stored_excl)
+        absence = [
+            (r["runIndex"], sentence)
+            for r in ok_runs
+            for sentence in (r.get("absenceSentences") or [])
+        ]
+        row["absence_sentences"] = (
+            NA if row["runs_mentioned_excl_absence"] is None
+            else " | ".join(f"run {i}: {sentence}" for i, sentence in absence) or "none"
+        )
+        row["evidence_skipped"] = NA if evidence_skipped is None else ("yes" if evidence_skipped else "no")
+        row["_absence"] = absence  # for the Markdown table; not a CSV column
         rows.append((row, target_urls, pool_counts, citation_counts))
 
     out_dir = os.path.dirname(os.path.abspath(__file__))
@@ -124,13 +143,13 @@ def main():
     fieldnames = []
     for row, *_ in rows:
         for key in row:
-            if key not in fieldnames:
+            if key not in fieldnames and not key.startswith("_"):
                 fieldnames.append(key)
     with open(base + ".csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, restval=0)
         writer.writeheader()
         for row, *_ in rows:
-            writer.writerow({k: (NA if v is None else v) for k, v in row.items()})
+            writer.writerow({k: (NA if v is None else v) for k, v in row.items() if not k.startswith("_")})
 
     # Markdown: same values, rounded for reading
     lines: list = [
@@ -140,6 +159,7 @@ def main():
         f"- **Observed:** {obs['createdAt']}",
         f"- **Fetcher:** `{obs.get('fetcher')}`",
         f"- **Data source:** {obs.get('dataDisclaimer') or NA}",
+        f"- **Evidence extraction:** {'skipped (observation-only run)' if evidence_skipped else 'run' if evidence_skipped is False else 'n/a (not recorded)'}",
         f"- **Runs:** {obs.get('runsSucceeded')}/{obs.get('runsAttempted')} succeeded "
         f"({(obs.get('config') or {}).get('runs_per_query', NA)} per query)",
     ]
@@ -173,15 +193,15 @@ def main():
         ),
         "## Summary",
         "",
-        "| # | Query | Runs (ok/attempted) | Unique sources (domains) | Mean Jaccard, URLs / domains | Mention % | Cited % | Citation position, mean / median | Analyzed page cited? |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| # | Query | Runs (ok/attempted) | Unique sources (domains) | Mean Jaccard, URLs / domains | Mention % | Mention % excl. absence | Cited % | Citation position, mean / median | Analyzed page cited? |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row, *_ in rows:
         lines.append(
             f"| {row['query_index']} | {row['query']} | {row['runs_succeeded']}/{row['runs_attempted']} | "
             f"{fmt(row['unique_sources'])} ({fmt(row['unique_domains'])}) | "
             f"{fmt(row['mean_pairwise_jaccard_urls'], 3)} / {fmt(row['mean_pairwise_jaccard_domains'], 3)} | "
-            f"{fmt(row['mention_pct'], 1)} | {fmt(row['cited_pct'], 1)} | "
+            f"{fmt(row['mention_pct'], 1)} | {fmt(row['mention_excl_absence_pct'], 1)} | {fmt(row['cited_pct'], 1)} | "
             f"{fmt(row['mean_citation_position'], 2)} / {fmt(row['median_citation_position'], 2)} | "
             f"{row['analyzed_page_cited']} |"
         )
@@ -201,6 +221,30 @@ def main():
                 f"{fmt(row['target_inline_linked_runs'])} ({fmt(row['target_inline_linked_pct'], 1)}) | "
                 f"{row['responses_with_tables']} ({row['responses_with_ragged_table']}) | {fmt(row['credits_used'])} |"
             )
+    def absence_cell(row):
+        if row["runs_mentioned_excl_absence"] is None:
+            return NA
+        return "<br>".join(f"run {i}: {sentence}".replace("|", "\|") for i, sentence in row["_absence"]) or "none"
+
+    lines += [
+        "",
+        "## Mentions and absence-of-information sentences",
+        "",
+        "*Mention %* is the string match of the brand name or domain anywhere in the answer. *Mention % excl. absence* counts "
+        "a run only if at least one sentence containing a brand term is not an absence-of-information statement (e.g. \"no "
+        "mention of\", \"does not contain information about\", \"cannot find\"); ordinary negation such as \"does not "
+        "charge setup fees\" is still a mention. Both are over the same runs. Below are every brand-term sentence classified "
+        "as an absence statement, for manual checking. `n/a`: not stored for this observation (the field was added on 2026-10-06).",
+        "",
+        "| # | Runs mentioned | Runs mentioned excl. absence | Absence-of-information sentences |",
+        "|---|---|---|---|",
+    ]
+    for row, *_ in rows:
+        lines.append(
+            f"| {row['query_index']} | {row['runs_mentioned']}/{row['rates_based_on_runs']} | "
+            f"{fmt(row['runs_mentioned_excl_absence'])}{'' if row['runs_mentioned_excl_absence'] is None else '/' + str(row['rates_based_on_runs'])} | "
+            f"{absence_cell(row)} |"
+        )
     lines += ["", "## Category counts", ""]
     lines.append("*Citations across runs* counts every web citation in every successful run (a source cited in 3 runs counts 3 times); "
                  "use it for share-of-citations claims. *Distinct sources in pool* counts each source in the query's union pool once.")
