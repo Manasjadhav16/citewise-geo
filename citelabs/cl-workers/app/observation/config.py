@@ -54,6 +54,8 @@ class Stage1Config:
     serpapi_timeout_seconds: float = 120.0
     # Stop observing once more than this fraction of planned runs end as followup_empty or timeout (None: never)
     max_unretrieved_fraction: Optional[float] = None
+    # Also count failed runs (errors, e.g. SerpApi 503s) toward max_unretrieved_fraction
+    unretrieved_includes_errors: bool = False
     source_categories: Tuple[str, ...] = load_source_categories("")
 
     @property
@@ -87,6 +89,7 @@ class Stage1Config:
             serpapi_min_balance=_env_int("STAGE1_SERPAPI_MIN_BALANCE", cls.serpapi_min_balance),
             serpapi_timeout_seconds=_env_float("STAGE1_SERPAPI_TIMEOUT_SECONDS", cls.serpapi_timeout_seconds),
             max_unretrieved_fraction=_env_float("STAGE1_MAX_UNRETRIEVED_FRACTION", cls.max_unretrieved_fraction),
+            unretrieved_includes_errors=_env_bool("STAGE1_UNRETRIEVED_INCLUDES_ERRORS", cls.unretrieved_includes_errors),
             source_categories=load_source_categories(),
         )
         # Per-run overrides from the API request (e.g. a smaller N for a quick run)

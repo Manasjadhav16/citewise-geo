@@ -218,6 +218,7 @@ class Stage1StartRequest(BaseModel):
     serpapi_min_balance: Optional[int] = None  # overrides STAGE1_SERPAPI_MIN_BALANCE
     serpapi_timeout_seconds: Optional[float] = None  # overrides STAGE1_SERPAPI_TIMEOUT_SECONDS
     max_unretrieved_fraction: Optional[float] = None  # overrides STAGE1_MAX_UNRETRIEVED_FRACTION
+    unretrieved_includes_errors: Optional[bool] = None  # overrides STAGE1_UNRETRIEVED_INCLUDES_ERRORS
 
 
 @app.post("/stage1/start")
@@ -244,6 +245,7 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
         "serpapi_min_balance": payload.serpapi_min_balance,
         "serpapi_timeout_seconds": payload.serpapi_timeout_seconds,
         "max_unretrieved_fraction": payload.max_unretrieved_fraction,
+        "unretrieved_includes_errors": payload.unretrieved_includes_errors,
     }
     try:
         config = Stage1Config.from_env(overrides)  # reject invalid config before starting

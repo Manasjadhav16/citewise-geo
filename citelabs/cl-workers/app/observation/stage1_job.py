@@ -464,10 +464,21 @@ async def _observe_all(
     completed = 0
     total = len(queries) * config.runs_per_query
     streak = {"parse_errors": 0, "stopped": False, "unretrieved": 0, "reason": None}
-    # Stop observing once followup_empty + timeout outcomes exceed this many (config fraction of all planned runs)
+    # Stop observing once followup_empty + timeout outcomes (plus errors, if configured) exceed this many
+    # (config fraction of all planned runs)
     unretrieved_limit = (
         config.max_unretrieved_fraction * total if config.max_unretrieved_fraction is not None else None
     )
+    unretrieved_label = "error, followup_empty or timeout" if config.unretrieved_includes_errors else "followup_empty or timeout"
+
+    def count_unretrieved():
+        streak["unretrieved"] += 1
+        if unretrieved_limit is not None and streak["unretrieved"] > unretrieved_limit and not streak["stopped"]:
+            streak["stopped"] = True
+            streak["reason"] = (
+                f"stopped: {streak['unretrieved']} of {total} planned runs ended as {unretrieved_label} "
+                f"(limit: more than {config.max_unretrieved_fraction:.0%})"
+            )
 
     async def observe(query: str) -> Observation:
         nonlocal completed
@@ -476,8 +487,12 @@ async def _observe_all(
                 raise ObservationSkipped(f"not run: {streak['reason']}")
             try:
                 observation = await fetcher.observe(query)
+            except ObservationSkipped:
+                raise
             except Exception:
                 streak["parse_errors"] = 0
+                if config.unretrieved_includes_errors:
+                    count_unretrieved()
                 raise
             finally:
                 completed += 1
@@ -491,13 +506,7 @@ async def _observe_all(
             else:
                 streak["parse_errors"] = 0
             if observation.outcome in (OUTCOME_FOLLOWUP_EMPTY, OUTCOME_TIMEOUT):
-                streak["unretrieved"] += 1
-                if unretrieved_limit is not None and streak["unretrieved"] > unretrieved_limit and not streak["stopped"]:
-                    streak["stopped"] = True
-                    streak["reason"] = (
-                        f"stopped: {streak['unretrieved']} of {total} planned runs ended as followup_empty or timeout "
-                        f"(limit: more than {config.max_unretrieved_fraction:.0%})"
-                    )
+                count_unretrieved()
             return observation
 
     runs_by_query: List[List[Dict[str, Any]]] = []

@@ -699,3 +699,34 @@ class TestTimeouts:
         config = Stage1Config.from_env({"runs_per_query": 4, "observation_concurrency": 1, "max_unretrieved_fraction": 0.5})
         _, reason = run(stage1_job._observe_all([{"q": "a", "type": "x"}], Scripted(), config, "obs"))
         assert len(calls) == 3 and "3 of 4 planned runs ended as followup_empty or timeout" in reason
+
+    def test_stop_rule_counts_errors_only_when_configured(self, monkeypatch):
+        from app.observation import stage1_job
+
+        async def quiet(*a, **k):
+            return None
+
+        monkeypatch.setattr(stage1_job, "_send_progress", quiet)
+
+        def scripted(steps, calls):
+            class Scripted:
+                async def observe(self, query):
+                    step = steps[len(calls)]
+                    calls.append(step)
+                    if step == "error":
+                        raise SerpApiError("HTTP 503, status 'Error': We couldn't get valid results")
+                    return Observation(answer_text="", model="m", outcome=step, credits_used=1)
+            return Scripted()
+
+        steps = ["error", OUTCOME_FOLLOWUP_EMPTY, "error", OUTCOME_ANSWER]
+        base = {"runs_per_query": 4, "observation_concurrency": 1, "max_unretrieved_fraction": 0.5}
+        calls = []
+        _, reason = run(stage1_job._observe_all([{"q": "a", "type": "x"}], scripted(steps, calls),
+                                                Stage1Config.from_env(base), "obs"))
+        assert len(calls) == 4 and reason is None  # errors ignored by default
+        calls = []
+        runs_by_query, reason = run(stage1_job._observe_all(
+            [{"q": "a", "type": "x"}], scripted(steps, calls),
+            Stage1Config.from_env({**base, "unretrieved_includes_errors": True}), "obs"))
+        assert len(calls) == 3 and "3 of 4 planned runs ended as error, followup_empty or timeout" in reason
+        assert "not run" in runs_by_query[0][3]["error"]  # skipped runs are not counted again
