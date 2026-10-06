@@ -51,7 +51,8 @@ type WorkerRun = {
   run_index: number;
   ok: boolean;
   error: string | null;
-  outcome?: string; // answer | no_aio | parse_error | error
+  outcome?: string; // answer | answer_no_references | no_aio | followup_empty | parse_error | error
+  page_token_seen?: boolean | null;
   credits_used?: number | null;
   fetch_meta?: Record<string, unknown> | null;
   parse_error?: string | null;
@@ -119,6 +120,11 @@ type WorkerQuery = {
     parse_errors?: number;
     inline_linked_runs?: number | null;
     inline_link_rate?: number | null;
+    runs_with_references?: number;
+    citation_rate_all_overviews?: number | null;
+    overview_retrieved_runs?: number | null;
+    followup_empty_runs?: number | null;
+    page_token_runs?: number | null;
   };
 };
 
@@ -289,6 +295,11 @@ export default async function observationRoutes(app: FastifyInstance) {
         parseErrors: q.metrics.parse_errors ?? null,
         inlineLinkedRuns: q.metrics.inline_linked_runs ?? null,
         inlineLinkRate: q.metrics.inline_link_rate ?? null,
+        runsWithReferences: q.metrics.runs_with_references ?? null,
+        citationRateAllOverviews: q.metrics.citation_rate_all_overviews ?? null,
+        overviewRetrievedRuns: q.metrics.overview_retrieved_runs ?? null,
+        followupEmptyRuns: q.metrics.followup_empty_runs ?? null,
+        pageTokenRuns: q.metrics.page_token_runs ?? null,
         targetEvidence: toJson(q.target_evidence),
       });
 
@@ -320,6 +331,7 @@ export default async function observationRoutes(app: FastifyInstance) {
           snippetLinks: toJson(r.inline_links),
           targetInlineLinked: r.target_inline_linked ?? null,
           rawResponses: toJson(r.raw_responses),
+          pageTokenSeen: r.page_token_seen ?? null,
         });
         for (const c of r.citations) {
           citationRows.push({
@@ -402,6 +414,11 @@ export default async function observationRoutes(app: FastifyInstance) {
           parseErrors: m.parse_errors ?? null,
           inlineLinkedRuns: m.inline_linked_runs ?? null,
           inlineLinkRate: m.inline_link_rate ?? null,
+          runsWithReferences: m.runs_with_references ?? null,
+          citationRateAllOverviews: m.citation_rate_all_overviews ?? null,
+          overviewRetrievedRuns: m.overview_retrieved_runs ?? null,
+          followupEmptyRuns: m.followup_empty_runs ?? null,
+          pageTokenRuns: m.page_token_runs ?? null,
           categoryBreakdown: toJson(m.category_breakdown),
           competitorGroupBreakdown: toJson(m.competitor_group_breakdown),
           sourceCategories: toJson(result.source_categories),
@@ -441,7 +458,7 @@ export default async function observationRoutes(app: FastifyInstance) {
               orderBy: { runIndex: 'asc' },
               ...(includeRaw
                 ? { include: { citations: { orderBy: { position: 'asc' } } } }
-                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, targetMentionedExclAbsence: true, mentionSentences: true, absenceSentences: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true } }),
+                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, targetMentionedExclAbsence: true, mentionSentences: true, absenceSentences: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true, pageTokenSeen: true } }),
             },
           },
         },

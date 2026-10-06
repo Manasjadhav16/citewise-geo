@@ -1,0 +1,463 @@
+{
+ "note": "Real SerpApi responses from the 2026-10-06 GitHub pilot step 1 (gl=in, hl=en, desktop), sanitized; engine=google responses trimmed to search_metadata/search_parameters/ai_overview. no_references_runs: two observations whose overview had text but no references key. page_token_first_response: the first response of a run whose follow-up came back empty (the empty follow-up itself was not stored by the fetcher at the time).",
+ "no_references_runs": [
+  [
+   {
+    "search_metadata": {
+     "id": "6ac506830bbc38e6fe44153a",
+     "status": "Success",
+     "created_at": "2026-10-06 14:32:35 UTC",
+     "google_url": "https://www.google.com/search?q=What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform%3F&oq=What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform%3F&hl=en&gl=in&sourceid=chrome&ie=UTF-8",
+     "processed_at": "2026-10-06 14:32:35 UTC",
+     "total_time_taken": 0.44
+    },
+    "search_parameters": {
+     "q": "What should a remote enterprise team look for when choosing a code hosting platform?",
+     "gl": "in",
+     "hl": "en",
+     "device": "desktop",
+     "engine": "google",
+     "google_domain": "google.com"
+    },
+    "ai_overview": {
+     "page_token": "wThYIXiczVXddqo4FH6AeY7hxo7gX9WuxeoKERCrR7HlqL1xQcCAgrEERXt33mWeau7mTSbgT6H-TM-5mDW5IITs_WXvzf7y_fjT95aLv377242iFX3g-TiOi5gQ7DtFRALepLsl4mfEpyFyHylZh8jxbBG5IQkczvVFZ8lhX_SW3G4jVjhERYFzPBHHlmKG4zIM18Iq0geRtmkJeoNL4cSpZVJnzk7bzik_5dlj8XulxRZFWnSWU1UqvjRHZaJsOhGIi2WhXCn2eTNgNuA_HVgDEzZ1knf5qpUEAPwKmswgJC0LJEnplPHGbFtKJk1P18oNtNRN1nEaARvT7fy9xdxUfLRZXPXO7ah7AF1LZ5m5Q-0rCWWCyQV7y_naHs4hpGXPb10ckpTd1ADEPTDQgHvZmdU-dzyrVWv_HQGt0a5K7H_oN2IHTxj0X4Hs7n1vDUNSndPZCmXHyLyNWQMLvBWyqcR7yEXpS0iTvoYvTYEo1bBbeRr74VvtfrdtDxrjTaCuZoGu9nQeWczOJ6bt2FN3Kjym61K5VBOalXrjLuUUoidS0Syp1MCaDhuoqdRJsVuUSkc6wewPyaaUfDUu5Sgl3SofW-58aBdKAyHJQRwM2M_oQQDz5IFKOynbiejsZYvBOt8ERwphcE6nA9oHaEIn_XjmUD9558LUZMnLeGSza39Oh2GfZ4_7e0_IWnePfGhNGXy-HqAsJRw7BRBnN5PLBDJSS3syvFW1faK9j1aWBblzdhslpXCZ62m5T-uwnGTLl9SA3Roszg7QJFl7Vti1BI-ns_AOFWJ0-swH7SIXkwqzbPXrV-StYXzJSj7y5hMNsvRpgxcyhvV26QXOkGZskD6yF9ao1Zq38WW6kMD6ORFC_zdOHSUqMZBvcQp-hVNMovAFiTrg7UGPEqV3DhJ1nVNKyqmDRCVAR4lqn0nUOacWWU6pero9JFck6mc5pd3g1An4IqeUS5zC1zmVSlSWU25Pz0mUdlGiPjj1KxJl_KpEpRRz9lNer9ZzfFW31FVrBLe-usL2zCJ-S6kRYdFvV-qKAP5Vt2ZB9BCYtn839ewHqdyJdvbdlH0gD47NvYkj14wK1CVr3y6YhdAJSOQUnGXkhKvQo04hcsyg4BOyKMxIWIhdZ1lALiHUW2Jmj4jtFFxCo2S58s2IGQWPXOCHRBTMWmvXAZPN_Hm9-a6VIoPEQq_3bO-k8dAhHqZGVRcEl6j9qDaIqdVo9F_Lk173D6OLtu_dGQhIbASGN1Zc-54OJpaCjfpg4rc7768Wkp-6tq7f11XaxRNVE2DPaFqlb_F61JW-18er_laDVpt48zQaKj6_68MWXm42VYMLQiSy7qli8E0HI8x-PmStBTEwTMLmGOjqPesNqczaiqPInDp0IzbKqFadCff1mtColZDABTjarcSmwNFlKJb-Ac_ZYdE",
+     "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=wThYIXiczVXddqo4FH6AeY7hxo7gX9WuxeoKERCrR7HlqL1xQcCAgrEERXt33mWeau7mTSbgT6H-TM-5mDW5IITs_WXvzf7y_fjT95aLv377242iFX3g-TiOi5gQ7DtFRALepLsl4mfEpyFyHylZh8jxbBG5IQkczvVFZ8lhX_SW3G4jVjhERYFzPBHHlmKG4zIM18Iq0geRtmkJeoNL4cSpZVJnzk7bzik_5dlj8XulxRZFWnSWU1UqvjRHZaJsOhGIi2WhXCn2eTNgNuA_HVgDEzZ1knf5qpUEAPwKmswgJC0LJEnplPHGbFtKJk1P18oNtNRN1nEaARvT7fy9xdxUfLRZXPXO7ah7AF1LZ5m5Q-0rCWWCyQV7y_naHs4hpGXPb10ckpTd1ADEPTDQgHvZmdU-dzyrVWv_HQGt0a5K7H_oN2IHTxj0X4Hs7n1vDUNSndPZCmXHyLyNWQMLvBWyqcR7yEXpS0iTvoYvTYEo1bBbeRr74VvtfrdtDxrjTaCuZoGu9nQeWczOJ6bt2FN3Kjym61K5VBOalXrjLuUUoidS0Syp1MCaDhuoqdRJsVuUSkc6wewPyaaUfDUu5Sgl3SofW-58aBdKAyHJQRwM2M_oQQDz5IFKOynbiejsZYvBOt8ERwphcE6nA9oHaEIn_XjmUD9558LUZMnLeGSza39Oh2GfZ4_7e0_IWnePfGhNGXy-HqAsJRw7BRBnN5PLBDJSS3syvFW1faK9j1aWBblzdhslpXCZ62m5T-uwnGTLl9SA3Roszg7QJFl7Vti1BI-ns_AOFWJ0-swH7SIXkwqzbPXrV-StYXzJSj7y5hMNsvRpgxcyhvV26QXOkGZskD6yF9ao1Zq38WW6kMD6ORFC_zdOHSUqMZBvcQp-hVNMovAFiTrg7UGPEqV3DhJ1nVNKyqmDRCVAR4lqn0nUOacWWU6pero9JFck6mc5pd3g1An4IqeUS5zC1zmVSlSWU25Pz0mUdlGiPjj1KxJl_KpEpRRz9lNer9ZzfFW31FVrBLe-usL2zCJ-S6kRYdFvV-qKAP5Vt2ZB9BCYtn839ewHqdyJdvbdlH0gD47NvYkj14wK1CVr3y6YhdAJSOQUnGXkhKvQo04hcsyg4BOyKMxIWIhdZ1lALiHUW2Jmj4jtFFxCo2S58s2IGQWPXOCHRBTMWmvXAZPN_Hm9-a6VIoPEQq_3bO-k8dAhHqZGVRcEl6j9qDaIqdVo9F_Lk173D6OLtu_dGQhIbASGN1Zc-54OJpaCjfpg4rc7768Wkp-6tq7f11XaxRNVE2DPaFqlb_F61JW-18er_laDVpt48zQaKj6_68MWXm42VYMLQiSy7qli8E0HI8x-PmStBTEwTMLmGOjqPesNqczaiqPInDp0IzbKqFadCff1mtColZDABTjarcSmwNFlKJb-Ac_ZYdE"
+    }
+   },
+   {
+    "ai_overview": {
+     "text_blocks": [
+      {
+       "type": "paragraph",
+       "snippet": "A remote enterprise team should look for a code hosting platform that offers robust security controls, seamless collaboration tools, high availability, and native CI/CD integration.",
+       "snippet_highlighted_words": [
+        "robust security controls, seamless collaboration tools, high availability, and native CI/CD integration"
+       ]
+      },
+      {
+       "type": "heading",
+       "snippet": "Security and Compliance"
+      },
+      {
+       "list": [
+        {
+         "snippet": "Access Control: Support for Single Sign-On (SSO), SAML, and Multi-Factor Authentication (MFA) to secure distributed team logins."
+        },
+        {
+         "snippet": "Granular Permissions: Role-based access control (RBAC) to restrict repository and branch access based on employee roles."
+        },
+        {
+         "snippet": "Compliance Certifications: Adherence to enterprise standards like SOC 2, GDPR, ISO 27001, and HIPAA."
+        },
+        {
+         "snippet": "Secret and Vulnerability Scanning: Automated scanning for leaked API keys, tokens, and vulnerable third-party dependencies within the code."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "Remote Collaboration and Workflow"
+      },
+      {
+       "list": [
+        {
+         "snippet": "Code Review Features: Clear pull request workflows, inline commenting, suggested changes, and draft PRs for asynchronous communication."
+        },
+        {
+         "snippet": "Asynchronous Project Management: Integrated issue tracking, kanban boards, and milestone planning to track progress across multiple time zones."
+        },
+        {
+         "snippet": "InnerSource Capabilities: Easy discovery of internal projects so teams can reuse code and collaborate across different departments."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "CI/CD and Automation"
+      },
+      {
+       "list": [
+        {
+         "snippet": "Built-in Pipelines: Native continuous integration and continuous deployment (CI/CD) runners to test and deploy code automatically."
+        },
+        {
+         "snippet": "Extensibility: Robust APIs, webhooks, and marketplace integrations with tools like Jira, Slack, andPagerDuty."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "Scalability, Reliability, and Support"
+      },
+      {
+       "list": [
+        {
+         "snippet": "Uptime SLAs: A strong Service Level Agreement (SLA) guaranteeing 99.9% uptime or higher."
+        },
+        {
+         "snippet": "Performance: Fast git clone, push, and pull operations regardless of geographical distance or repository size."
+        },
+        {
+         "snippet": "Enterprise Support: Dedicated customer success managers, 24/7 technical assistance, and guaranteed response times for critical outages."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "If you'd like, let me know:"
+      },
+      {
+       "list": [
+        {
+         "snippet": "Your preferred deployment model (cloud-hosted vs. self-hosted/on-premise)"
+        },
+        {
+         "snippet": "The primary languages or ecosystems your team uses"
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "I can help you compare specific enterprise platforms like GitHub, GitLab, or Bitbucket."
+      }
+     ]
+    },
+    "search_metadata": {
+     "id": "6ac5068310ceed48231999b5",
+     "status": "Success",
+     "created_at": "2026-10-06 14:32:35 UTC",
+     "processed_at": "2026-10-06 14:32:35 UTC",
+     "total_time_taken": 3.44,
+     "google_ai_overview_url": "https://www.google.com/async/folsrch?sourceid=chrome&hl=en&gl=in&yv=3&cs=0&ei=gwbFarX2Cru0ptQPtIvD0Q8&async=_basejs:/xjs/_/js/k%3Dxjs.s.en_GB.T9W2oFvJtAw.2023.O/am%3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgIAYAAAJAAAAEAAAAAAAAAAAAAAAAAAAAAAAAABAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEEAABIAEAAAAAAAAAABBAAAAACAAAAAAAAAAgAEABAAgAIQAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAEECAAAAEQgAABAAAAA_xjzDQAAGgAAAAAAAAkAAAAAAAAAAAAAAAAAAAAAAAAAkAAAAAAAAAAAAGABAAAAQIABAAAEgAACIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAFAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAgAAAAAFAAAAAAAAYAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAABBgAAAAAAAAAAAIACgMAPIAhAAAAAAAAAAgAAAAAAAAAAAIAEIAAAAAAAAAAAAQAADAAAAIAcAI8H4BBBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAKgAOZAEhAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUBGeAgAAAAAAAFsDAAE/dg%3D0/br%3D1/ichc%3D1/rs%3DACT90oF4rL3KXlrq56yxHP8XvmGpfmQGMQ/cb%3Dloaded_h_0?cb%3D121509378,_basecss:/xjs/_/ss/k%3Dxjs.s.Gmb_R8c9F7o.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAAAAIAAQAAAAAAAAAAAAAAAACCoAAAAAAAAAAAABQAAAAAAEIAMCACACAAAAAAAAAAAACFHgAAADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAAAAgAIAEAAAAAAAAAABBAAACAAAAAACAAAAAAAAABAAgQBQAAAAAARQAAEAAAAAAQAAAAAAAAAAAAIEBiAAAAAAAAABABAAAAAAAAAAAHAAAAAAAAAAAAAAAAACABAAAAAAAAAAAAAAAAAgOAAAABACAYAQAAAAABgAAAAAEAAACAAAAAAAAAAAAACEBEgAAAQAAAAAAAwAAAAAAAAAAAABAACCEQgBAAFAAAq4IAAAAgAMAAgAAAAAAAE0EJEAAAAAAAAAAAAAAAAgAIAhACCAAAAAAAgAAAAAAIAAAAAAAYgAAAAAAAAAAARQAAQgAYAQJAIBEISFABICAAAAABAAACEAEAAAAAIACBAQAAAAAAAAAAAAAIgAAAAAAAAAAAAAAAAAAAABAAgBgAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE/br%3D1/cb%3Dloaded_h_0/rs%3DACT90oHAToXC7H1TCfcIUvcQWdkbWDDjHg?cb%3D121509378,_basecomb:/xjs/_/js/k%3Dxjs.s.en_GB.T9W2oFvJtAw.2023.O/ck%3Dxjs.s.Gmb_R8c9F7o.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAAAAIAAQAAAAAAAAAAAAAAAACCoAAAAAgIAYAAAJQAAAEAAEIAMCACACAAAAAAAAAAAACFHgACADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAEEAgBIAEAAAAAAAAAABBAAACACAAAACAAAAAgAEABAAgQJQAAAAAFRQAAEAAAAAAQAAAAAAAAAAAAIEFiAAAAEQgAABABAAA_xjzDQAAHgAAAAAAAAkAAAAAAACABAAAAAAAAAAAAAAAkAgOAAAABACAYGQBAAAARoABAAAEgAACIAAAAAAAAAAAACEBEgAAAQAAAAAAAwAAAAAAAAAAAABAACCEQgBAAFAAAq4IAIAAgAMAAgAAAAAAAE0EJEAAAAAAAIAAAAAAAAgAIAhACCAAAAAAAgAAAAAFIAAAAAAAYgAAAAAAAAAAgRQAAQgAYAQJAIBEISFABICAAAABBgAACEAEAAAAAIAChMQPIAhAAAAAAAAAIgAAAAAAAAAAAIAEIAAAAABAAgBgAQEADAAAAIAcAI8H4BBBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAKgAOZAUhAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUBGeAgAAAAAAAFsDAAE/d%3D1/ed%3D1/dg%3D0/br%3D1/ujg%3D1/ichc%3D1/rs%3DACT90oGpDWCxlGpgdfbolDF5o0kOH37F0A/cb%3Dloaded_h_0?cb%3D121509378,_fmt:madl,_id:B2Jtyd,_mado:ed&q=What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform?&mlro=0a5DyJAYvjSuvVI1tUow0MMSdyBXReoigsU4Q00hoGOt5Pwsb88OZ2YML-ULcxzLfAmowUmUiXFhd6sPYbFgU7PYlHJzZbcEKLdQQ67GsLgYGI0CMU9b1NwuWLBV7XpOxICbHoij&mlros=SzQRDgnvv4U&mrc=CAA4gANQAWgAcACYAQCgAUaoAQCwAQG6AQEB2AEA&sca_esv=82c54f06750851c0&mgtyp=90&snr=1"
+    },
+    "search_parameters": {
+     "engine": "google_ai_overview",
+     "page_token": "wThYIXiczVXddqo4FH6AeY7hxo7gX9WuxeoKERCrR7HlqL1xQcCAgrEERXt33mWeau7mTSbgT6H-TM-5mDW5IITs_WXvzf7y_fjT95aLv377242iFX3g-TiOi5gQ7DtFRALepLsl4mfEpyFyHylZh8jxbBG5IQkczvVFZ8lhX_SW3G4jVjhERYFzPBHHlmKG4zIM18Iq0geRtmkJeoNL4cSpZVJnzk7bzik_5dlj8XulxRZFWnSWU1UqvjRHZaJsOhGIi2WhXCn2eTNgNuA_HVgDEzZ1knf5qpUEAPwKmswgJC0LJEnplPHGbFtKJk1P18oNtNRN1nEaARvT7fy9xdxUfLRZXPXO7ah7AF1LZ5m5Q-0rCWWCyQV7y_naHs4hpGXPb10ckpTd1ADEPTDQgHvZmdU-dzyrVWv_HQGt0a5K7H_oN2IHTxj0X4Hs7n1vDUNSndPZCmXHyLyNWQMLvBWyqcR7yEXpS0iTvoYvTYEo1bBbeRr74VvtfrdtDxrjTaCuZoGu9nQeWczOJ6bt2FN3Kjym61K5VBOalXrjLuUUoidS0Syp1MCaDhuoqdRJsVuUSkc6wewPyaaUfDUu5Sgl3SofW-58aBdKAyHJQRwM2M_oQQDz5IFKOynbiejsZYvBOt8ERwphcE6nA9oHaEIn_XjmUD9558LUZMnLeGSza39Oh2GfZ4_7e0_IWnePfGhNGXy-HqAsJRw7BRBnN5PLBDJSS3syvFW1faK9j1aWBblzdhslpXCZ62m5T-uwnGTLl9SA3Roszg7QJFl7Vti1BI-ns_AOFWJ0-swH7SIXkwqzbPXrV-StYXzJSj7y5hMNsvRpgxcyhvV26QXOkGZskD6yF9ao1Zq38WW6kMD6ORFC_zdOHSUqMZBvcQp-hVNMovAFiTrg7UGPEqV3DhJ1nVNKyqmDRCVAR4lqn0nUOacWWU6pero9JFck6mc5pd3g1An4IqeUS5zC1zmVSlSWU25Pz0mUdlGiPjj1KxJl_KpEpRRz9lNer9ZzfFW31FVrBLe-usL2zCJ-S6kRYdFvV-qKAP5Vt2ZB9BCYtn839ewHqdyJdvbdlH0gD47NvYkj14wK1CVr3y6YhdAJSOQUnGXkhKvQo04hcsyg4BOyKMxIWIhdZ1lALiHUW2Jmj4jtFFxCo2S58s2IGQWPXOCHRBTMWmvXAZPN_Hm9-a6VIoPEQq_3bO-k8dAhHqZGVRcEl6j9qDaIqdVo9F_Lk173D6OLtu_dGQhIbASGN1Zc-54OJpaCjfpg4rc7768Wkp-6tq7f11XaxRNVE2DPaFqlb_F61JW-18er_laDVpt48zQaKj6_68MWXm42VYMLQiSy7qli8E0HI8x-PmStBTEwTMLmGOjqPesNqczaiqPInDp0IzbKqFadCff1mtColZDABTjarcSmwNFlKJb-Ac_ZYdE"
+    }
+   }
+  ],
+  [
+   {
+    "search_metadata": {
+     "id": "6ac50687a1de128684e8201d",
+     "status": "Success",
+     "created_at": "2026-10-06 14:32:39 UTC",
+     "google_url": "https://www.google.com/search?q=What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform%3F&oq=What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform%3F&hl=en&gl=in&sourceid=chrome&ie=UTF-8",
+     "processed_at": "2026-10-06 14:32:39 UTC",
+     "total_time_taken": 6.69
+    },
+    "search_parameters": {
+     "q": "What should a remote enterprise team look for when choosing a code hosting platform?",
+     "gl": "in",
+     "hl": "en",
+     "device": "desktop",
+     "engine": "google",
+     "google_domain": "google.com"
+    },
+    "ai_overview": {
+     "page_token": "EnUUOHiczZXddqo4FMcfYJ5juPEcxQ-sdi1WVxIB8aOVHm21NywEDCoQTfDzbt5lnmoeYp5hAn4UWnV6zsWsyYUBs_fOzmb_8v_jT38azv_67W8vihbsvlDYbDZ5TAj23bxNgoLFdqFdmBCfUdt7wL48DQVGVtR2p45se5QEruD5shsKu7VcFmwmi4I7lWfGWLUosjq9fYOulJ5UWy2Xhi0k4WRzbDF3xnfbzljBLPCf-e_lBn_Js7wbmhrM9-uvJaKuWxHY5EtiqZx_KlgBtwH_6cA6GPGpFT8rV60gAOgr0RQeAurpQBAmU8ob82UYT7qRvKs3oiVuioGTDPgwt7N9g7tp-GQzv-qdWdEOAQw9mRXujvSvHCiVTCbZW87X1nAmQlL27NLFAWF6UQcId0FPB95lZ177zPa8Vo3D_zbQa80K5N_DuJE7aGPw9AYU7-B7awyg5p73VhnfRik4mDewWBhTPhULU9uzkwfK4r5G_bpI1ArtlNtDny6l6m7b7NWG60BbTAJD6xoFe8ztfGI5rmN6pviQvBdLRUmsl-9q3xKmbHaGiqWh0oKx-Vyz6-odyXfysHjCCaU_SPpI8b-DS2eEcbcqp5b7OFDs-MkNIZIJcTTgH6OLAMrCg9RmXLYz6Pxhi8Eq2wQnhDD4jBM6ZfKeMbc77flsnL0zaeoKnKY80qdrfjwOj51aPyaGnw6eiLfuIfKxNRXw8XpACowZOyewSS_GlwniUMMDDMuKftik-97Kiqi0Pt1GcSk87prN6vRxR-nyxTXgtwbPswV0qOg_VH4todPuPL1jhThOH3nQL7IYV5if1rh-Rd4agy9ZKSduPmCQxkcbdX7QAdg3quaqt69OS7DMesOtpbk9cBkXEox_ToTs_xtTJ4mKDZRbTKGvMMUlCl-QqGO8Q9CzRLWOEnWdKTVh6ihRcaCTRDU_SdRnpuZppjQjWX4mVyTqZ5nSbzB1DnyRKfUSU_g6U4lEpZnyukZGovSLEvXO1K9I1OBXJSpBzD1MWb1azfBV3dJWBtjPodPdButdFUkDZe0No8Xie7fz77o1CaL7wHL8b-bUuYelVrRzvpn8D3LvOsJStsLcq2dFOeaRle_krBx1AxK5OTeMXLqgU-bmItcKcj4h89yE0NzGc8Oc7RHCpiHm9jZx3JxHWBS_Lnwr4kbBgxD4lMiiVS0Om4g8oRckLajVr4frl4gu5uvZSMd9D4LJ7FVdM0o2_aClUgUC5j82Tf_umfVHo_3TjkpiT2y-SW8NcamVZs9BoBXNSVurL8ez3qNO5-1aUK5HzlLCbrvj7FvQ6awa9aC9_m57d5WXaWc_LM4jux1MSJspRpIXk19ov9zYG5qiMSGgtsxbqYLBowFeMe8ExPsMYTCwCJ83wNCqvFFgifeYwGzLdNlarpVsqTIRq3eSWJOKtigEONot5EpFYCGVi_8Auv1nvw",
+     "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=EnUUOHiczZXddqo4FMcfYJ5juPEcxQ-sdi1WVxIB8aOVHm21NywEDCoQTfDzbt5lnmoeYp5hAn4UWnV6zsWsyYUBs_fOzmb_8v_jT38azv_67W8vihbsvlDYbDZ5TAj23bxNgoLFdqFdmBCfUdt7wL48DQVGVtR2p45se5QEruD5shsKu7VcFmwmi4I7lWfGWLUosjq9fYOulJ5UWy2Xhi0k4WRzbDF3xnfbzljBLPCf-e_lBn_Js7wbmhrM9-uvJaKuWxHY5EtiqZx_KlgBtwH_6cA6GPGpFT8rV60gAOgr0RQeAurpQBAmU8ob82UYT7qRvKs3oiVuioGTDPgwt7N9g7tp-GQzv-qdWdEOAQw9mRXujvSvHCiVTCbZW87X1nAmQlL27NLFAWF6UQcId0FPB95lZ177zPa8Vo3D_zbQa80K5N_DuJE7aGPw9AYU7-B7awyg5p73VhnfRik4mDewWBhTPhULU9uzkwfK4r5G_bpI1ArtlNtDny6l6m7b7NWG60BbTAJD6xoFe8ztfGI5rmN6pviQvBdLRUmsl-9q3xKmbHaGiqWh0oKx-Vyz6-odyXfysHjCCaU_SPpI8b-DS2eEcbcqp5b7OFDs-MkNIZIJcTTgH6OLAMrCg9RmXLYz6Pxhi8Eq2wQnhDD4jBM6ZfKeMbc77flsnL0zaeoKnKY80qdrfjwOj51aPyaGnw6eiLfuIfKxNRXw8XpACowZOyewSS_GlwniUMMDDMuKftik-97Kiqi0Pt1GcSk87prN6vRxR-nyxTXgtwbPswV0qOg_VH4todPuPL1jhThOH3nQL7IYV5if1rh-Rd4agy9ZKSduPmCQxkcbdX7QAdg3quaqt69OS7DMesOtpbk9cBkXEox_ToTs_xtTJ4mKDZRbTKGvMMUlCl-QqGO8Q9CzRLWOEnWdKTVh6ihRcaCTRDU_SdRnpuZppjQjWX4mVyTqZ5nSbzB1DnyRKfUSU_g6U4lEpZnyukZGovSLEvXO1K9I1OBXJSpBzD1MWb1azfBV3dJWBtjPodPdButdFUkDZe0No8Xie7fz77o1CaL7wHL8b-bUuYelVrRzvpn8D3LvOsJStsLcq2dFOeaRle_krBx1AxK5OTeMXLqgU-bmItcKcj4h89yE0NzGc8Oc7RHCpiHm9jZx3JxHWBS_Lnwr4kbBgxD4lMiiVS0Om4g8oRckLajVr4frl4gu5uvZSMd9D4LJ7FVdM0o2_aClUgUC5j82Tf_umfVHo_3TjkpiT2y-SW8NcamVZs9BoBXNSVurL8ez3qNO5-1aUK5HzlLCbrvj7FvQ6awa9aC9_m57d5WXaWc_LM4jux1MSJspRpIXk19ov9zYG5qiMSGgtsxbqYLBowFeMe8ExPsMYTCwCJ83wNCqvFFgifeYwGzLdNlarpVsqTIRq3eSWJOKtigEONot5EpFYCGVi_8Auv1nvw"
+    }
+   },
+   {
+    "ai_overview": {
+     "text_blocks": [
+      {
+       "type": "paragraph",
+       "snippet": "When choosing a code hosting platform, a remote enterprise team must look for a platform that balances enterprise-grade security, seamless collaboration tools, robust DevOps automation, and high scalability. Because remote teams rely entirely on digital infrastructure to stay aligned, the choice of platform directly impacts developer velocity and data protection.",
+       "snippet_highlighted_words": [
+        "a platform that balances enterprise-grade security, seamless collaboration tools, robust DevOps automation, and high scalability"
+       ]
+      },
+      {
+       "type": "paragraph",
+       "snippet": "Here is a comprehensive checklist of what your enterprise team should evaluate, grouped by logical priorities:"
+      },
+      {
+       "type": "heading",
+       "snippet": "1. Enterprise Security & Compliance"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "Security is the most critical factor for enterprise organizations, especially when managing decentralized, remote endpoints."
+      },
+      {
+       "list": [
+        {
+         "snippet": "Access Control & Identity Management: Look for robust SAML SSO (Single Sign-On), SCIM (System for Cross-domain Identity Management) for automated provisioning, and granular Role-Based Access Control (RBAC)."
+        },
+        {
+         "snippet": "Compliance Certifications: Ensure the platform complies with global and industry standards such as SOC 1/2/3, ISO 27001, GDPR, and HIPAA."
+        },
+        {
+         "snippet": "Data Security & Resiliency: Check for end-to-end encryption (at rest and in transit), IP allowlisting, and automated disaster recovery options across multiple cloud regions."
+        },
+        {
+         "snippet": "Secret & Vulnerability Scanning: The platform should natively scan code repositories for hardcoded secrets (API keys, passwords) and known vulnerabilities in dependencies before they reach production."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "2. Remote Collaboration & Code Review"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "Remote teams cannot tap a coworker on the shoulder to ask for a code review. The platform must facilitate asynchronous communication seamlessly."
+      },
+      {
+       "list": [
+        {
+         "snippet": "Advanced Pull/Merge Requests: Look for features like threaded comments, inline code suggestions, and mandatory review rules (e.g., requiring approvals from specific code owners)."
+        },
+        {
+         "snippet": "Draft & Work-in-Progress (WIP) States: Allows remote developers to share early-stage code for feedback without triggering automated production pipelines."
+        },
+        {
+         "snippet": "Real-time Notifications: Deep integration with communication tools (like Slack or Microsoft Teams) so developers receive actionable alerts without constantly refreshing the platform."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "3. Integrated CI/CD & DevOps Automation"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "To maintain speed, remote teams need to automate testing, linting, and deployment phases."
+      },
+      {
+       "list": [
+        {
+         "snippet": "Built-in Pipelines: Platforms with native CI/CD (like GitHub Actions or GitLab CI/CD) remove the friction of managing separate, third-party automation servers."
+        },
+        {
+         "snippet": "Self-Hosted Runners/Agents: For security or resource-heavy builds, the platform must allow you to run automated tests on your own secure internal infrastructure."
+        },
+        {
+         "snippet": "Environment Management: Look for features that support infrastructure-as-code and preview environments, allowing QA teams to test changes remotely in an isolated space."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "4. Hosting Flexibility & Scalability"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "Enterprise teams often have complex infrastructure requirements that dictate where code must live."
+      },
+      {
+       "list": [
+        {
+         "snippet": "Deployment Options: Evaluate whether you need SaaS (Cloud-hosted) for zero maintenance, or Self-Hosted/On-Premises (Single-tenant cloud or bare metal) to meet strict regulatory data-residency laws."
+        },
+        {
+         "snippet": "Performance for Distributed Teams: Ensure the platform utilizes Global Content Delivery Networks (CDNs) or offers geo-replication to prevent slow git clone or git pull times for developers working across different continents."
+        },
+        {
+         "snippet": "Large File Support (Git LFS): Essential if your engineering projects involve large binary assets, datasets, or media files."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "5. Ecosystem & Extensibility"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "No platform exists in a vacuum. It must adapt to your existing enterprise software stack."
+      },
+      {
+       "list": [
+        {
+         "snippet": "Marketplace & API: A rich marketplace of extensions and a powerful, well-documented REST/GraphQL API are vital for building custom internal tools."
+        },
+        {
+         "snippet": "Project Management Integration: Check how smoothly the platform links code changes to project management tickets (e.g., Jira, Azure Boards, or built-in issue trackers)."
+        }
+       ],
+       "type": "list"
+      },
+      {
+       "type": "heading",
+       "snippet": "Core Platform Comparison"
+      },
+      {
+       "type": "paragraph",
+       "snippet": "The three major enterprise players dominate different niches. Here is how they generally align with corporate priorities:"
+      },
+      {
+       "type": "table",
+       "table": [
+        [
+         "Feature Focus",
+         "GitHub Enterprise",
+         "GitLab Ultimate",
+         "Azure DevOps"
+        ],
+        [
+         "Best For",
+         "Developer experience, open-source familiarity, and massive third-party ecosystem.",
+         "All-in-one DevOps lifecycle, built-in security compliance, and single-application efficiency.",
+         "Deep integration with Microsoft ecosystems, enterprise corporate planning, and legacy migrations."
+        ],
+        [
+         "CI/CD",
+         "GitHub Actions (Highly modular)",
+         "GitLab CI/CD (Highly mature, YAML-driven)",
+         "Azure Pipelines (Excellent multi-cloud support)"
+        ],
+        [
+         "Security Philosophy",
+         "Advanced Security (Add-on/Native features)",
+         "Native DevSecOps (In-house scanning tools)",
+         "Microsoft Entra ID (Deeply integrated governance)"
+        ]
+       ],
+       "detailed": [
+        [
+         {
+          "snippet": "Feature Focus"
+         },
+         {
+          "snippet": "GitHub Enterprise"
+         },
+         {
+          "snippet": "GitLab Ultimate"
+         },
+         {
+          "snippet": "Azure DevOps"
+         }
+        ],
+        [
+         {
+          "snippet": "Best For"
+         },
+         {
+          "snippet": "Developer experience, open-source familiarity, and massive third-party ecosystem."
+         },
+         {
+          "snippet": "All-in-one DevOps lifecycle, built-in security compliance, and single-application efficiency."
+         },
+         {
+          "snippet": "Deep integration with Microsoft ecosystems, enterprise corporate planning, and legacy migrations."
+         }
+        ],
+        [
+         {
+          "snippet": "CI/CD"
+         },
+         {
+          "snippet": "GitHub Actions (Highly modular)"
+         },
+         {
+          "snippet": "GitLab CI/CD (Highly mature, YAML-driven)"
+         },
+         {
+          "snippet": "Azure Pipelines (Excellent multi-cloud support)"
+         }
+        ],
+        [
+         {
+          "snippet": "Security Philosophy"
+         },
+         {
+          "snippet": "Advanced Security (Add-on/Native features)"
+         },
+         {
+          "snippet": "Native DevSecOps (In-house scanning tools)"
+         },
+         {
+          "snippet": "Microsoft Entra ID (Deeply integrated governance)"
+         }
+        ]
+       ],
+       "formatted": [
+        {
+         "azure_dev_ops": "Deep integration with Microsoft ecosystems, enterprise corporate planning, and legacy migrations.",
+         "feature_focus": "Best For",
+         "git_lab_ultimate": "All-in-one DevOps lifecycle, built-in security compliance, and single-application efficiency.",
+         "github_enterprise": "Developer experience, open-source familiarity, and massive third-party ecosystem."
+        },
+        {
+         "azure_dev_ops": "Azure Pipelines (Excellent multi-cloud support)",
+         "feature_focus": "CI/CD",
+         "git_lab_ultimate": "GitLab CI/CD (Highly mature, YAML-driven)",
+         "github_enterprise": "GitHub Actions (Highly modular)"
+        },
+        {
+         "azure_dev_ops": "Microsoft Entra ID (Deeply integrated governance)",
+         "feature_focus": "Security Philosophy",
+         "git_lab_ultimate": "Native DevSecOps (In-house scanning tools)",
+         "github_enterprise": "Advanced Security (Add-on/Native features)"
+        }
+       ]
+      },
+      {
+       "type": "paragraph",
+       "snippet": "To help me tailor this advice, could you share a bit more context? If you'd like, let me know:"
+      },
+      {
+       "list": [
+        {
+         "snippet": "What compliance or regulatory requirements (if any) your industry must follow?"
+        },
+        {
+         "snippet": "Whether you prefer a fully managed cloud service or need an on-premises/private cloud deployment?"
+        },
+        {
+         "snippet": "What project management tools (like Jira) you currently use?"
+        }
+       ],
+       "type": "list"
+      }
+     ]
+    },
+    "search_metadata": {
+     "id": "6ac5068ea9fcce0fae3214ed",
+     "status": "Success",
+     "created_at": "2026-10-06 14:32:46 UTC",
+     "processed_at": "2026-10-06 14:32:46 UTC",
+     "total_time_taken": 9.76,
+     "google_ai_overview_url": "https://www.google.com/async/folsrch?gl=in&sourceid=chrome&hl=en&yv=3&cs=0&ei=jQbFarCaLPzDruEP58uqqQc&async=_basejs:/xjs/_/js/k%3Dxjs.s.en_GB.T9W2oFvJtAw.2023.O/am%3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgIAYAAAJAAAAEAAAAAAAAAAAAAAAAAAAAAAAAABAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEEAABIAEAAAAAAAAAABBAAAAACAAAAAAAAAAgAEABAAgAIQAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAEECAAAAEQgAABAAAAA_xjzDQAAGgAAAAAAAAkAAAAAAAAAAAAAAAAAAAAAAAAAkAAAAAAAAAAAAGABAAAAQIABAAAEgAACIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAFAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAgAAAAAFAAAAAAAAYAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAABBgAAAAAAAAAAAIACgMAPIAhAAAAAAAAAAgAAAAAAAAAAAIAEIAAAAAAAAAAAAQAADAAAAIAcAI8H4BBBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAKgAOZAEhAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUBGeAgAAAAAAAFsDAAE/dg%3D0/br%3D1/ichc%3D1/rs%3DACT90oF4rL3KXlrq56yxHP8XvmGpfmQGMQ/cb%3Dloaded_h_0?cb%3D121509378,_basecss:/xjs/_/ss/k%3Dxjs.s.Gmb_R8c9F7o.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAAAAAAAABQAAAAAAEIAMCACACAAAAAAAAAAAACFHgAAADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAAAAgAIAEAAAAAAAAAABBAAACAAAAAACAAAAAAAAABAAgABQAAAAAARQAAEAAAAAAQAAAAAAAAAAAAIEBiAAAAAAAAABABAAAAAAAAAAAHAAAAAAAAAAAAAAAAACABAAAAAAAAAAgAAAAAAgOAAAABACAYAQAAAAABgAAAAAEAAACAAAAAAAAAAAAACEBEgAAAQAAAAAAAwAAAAAAAAAAAABAACCEQgBAAFAAAq4IAAAAgAMAAgAAAAAAAE0EJEAAAAAAAAAAAAAAAAgAIAhACCAAAAAAAgAAAAAAIAAAAAAAYgAAAAAAAAAAARQAAQgAYAQJAIBEISFABICAAAAABAAACEAEAAAAAIACBAQAAAAAAAAAAAAAIgAAAAAAAAAAAAAAAAAAAABAAgBgAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE/br%3D1/cb%3Dloaded_h_0/rs%3DACT90oGYLSrUAzD6_uPz6i2B3sPXxaGePA?cb%3D121509378,_basecomb:/xjs/_/js/k%3Dxjs.s.en_GB.T9W2oFvJtAw.2023.O/ck%3Dxjs.s.Gmb_R8c9F7o.L.B1.O/am%3DCAAIAAAAAAAAAQAAAAAAAAAAAIAAAUQAAAAAAAAAAAAAAAAAAABACAAEAABAAAAAAAAAAAAAAAAAAAAACAIAAQAAAAAAAAAAAAAAAACCoAAAAAgIAYAAAJQAAAEAAEIAMCACACAAAAAAAAAAAACFHgACADAAAAAAAADAAxgAuAgAAAAAAAAAAAAEAAAAEEAgBIAEAAAAAAAAAABBAAACACAAAACAAAAAgAEABAAgAJQAAAAAFRQAAEAAAAAAQAAAAAAAAAAAAIEFiAAAAEQgAABABAAA_xjzDQAAHgAAAAAAAAkAAAAAAACABAAAAAAAAAAgAAAAkAgOAAAABACAYGQBAAAARoABAAAEgAACIAAAAAAAAAAAACEBEgAAAQAAAAAAAwAAAAAAAAAAAABAACCEQgBAAFAAAq4IAIAAgAMAAgAAAAAAAE0EJEAAAAAAAIAAAAAAAAgAIAhACCAAAAAAAgAAAAAFIAAAAAAAYgAAAAAAAAAAgRQAAQgAYAQJAIBEISFABICAAAABBgAACEAEAAAAAIAChMQPIAhAAAAAAAAAIgAAAAAAAAAAAIAEIAAAAABAAgBgAQEADAAAAIAcAI8H4BBBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAKgAOZAUhAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUBGeAgAAAAAAAFsDAAE/d%3D1/ed%3D1/dg%3D0/br%3D1/ujg%3D1/ichc%3D1/rs%3DACT90oGuQAzkBdMxmvy6C5UEvhXtpp-MLQ/cb%3Dloaded_h_0?cb%3D121509378,_fmt:madl,_id:B2Jtyd,_mado:ed&q=an+What+should+a+remote+enterprise+team+look+for+when+choosing+a+code+hosting+platform?&mlro=0a61XHCoOCVC5praT9nvVtrpkvjYIgThBAfjWFvsrowTmJFrEBAslNH_l7RsTYYzOyr50P0HZ5ZD0qG2jRmmG1_fKG9qbjPNIrkK8m39tdq5geKLdzJBdLuD9mKv-ch74ViLzX1ktcKmfoKsEQ&mlros=VrT3DzQGEGs&mrc=CAA4gANQAWgAcACYAQCgAUaoAQCwAQG6AQEB2AEA&sca_esv=82c54f06750851c0&mgtyp=44&snr=1"
+    },
+    "search_parameters": {
+     "engine": "google_ai_overview",
+     "page_token": "EnUUOHiczZXddqo4FMcfYJ5juPEcxQ-sdi1WVxIB8aOVHm21NywEDCoQTfDzbt5lnmoeYp5hAn4UWnV6zsWsyYUBs_fOzmb_8v_jT38azv_67W8vihbsvlDYbDZ5TAj23bxNgoLFdqFdmBCfUdt7wL48DQVGVtR2p45se5QEruD5shsKu7VcFmwmi4I7lWfGWLUosjq9fYOulJ5UWy2Xhi0k4WRzbDF3xnfbzljBLPCf-e_lBn_Js7wbmhrM9-uvJaKuWxHY5EtiqZx_KlgBtwH_6cA6GPGpFT8rV60gAOgr0RQeAurpQBAmU8ob82UYT7qRvKs3oiVuioGTDPgwt7N9g7tp-GQzv-qdWdEOAQw9mRXujvSvHCiVTCbZW87X1nAmQlL27NLFAWF6UQcId0FPB95lZ177zPa8Vo3D_zbQa80K5N_DuJE7aGPw9AYU7-B7awyg5p73VhnfRik4mDewWBhTPhULU9uzkwfK4r5G_bpI1ArtlNtDny6l6m7b7NWG60BbTAJD6xoFe8ztfGI5rmN6pviQvBdLRUmsl-9q3xKmbHaGiqWh0oKx-Vyz6-odyXfysHjCCaU_SPpI8b-DS2eEcbcqp5b7OFDs-MkNIZIJcTTgH6OLAMrCg9RmXLYz6Pxhi8Eq2wQnhDD4jBM6ZfKeMbc77flsnL0zaeoKnKY80qdrfjwOj51aPyaGnw6eiLfuIfKxNRXw8XpACowZOyewSS_GlwniUMMDDMuKftik-97Kiqi0Pt1GcSk87prN6vRxR-nyxTXgtwbPswV0qOg_VH4todPuPL1jhThOH3nQL7IYV5if1rh-Rd4agy9ZKSduPmCQxkcbdX7QAdg3quaqt69OS7DMesOtpbk9cBkXEox_ToTs_xtTJ4mKDZRbTKGvMMUlCl-QqGO8Q9CzRLWOEnWdKTVh6ihRcaCTRDU_SdRnpuZppjQjWX4mVyTqZ5nSbzB1DnyRKfUSU_g6U4lEpZnyukZGovSLEvXO1K9I1OBXJSpBzD1MWb1azfBV3dJWBtjPodPdButdFUkDZe0No8Xie7fz77o1CaL7wHL8b-bUuYelVrRzvpn8D3LvOsJStsLcq2dFOeaRle_krBx1AxK5OTeMXLqgU-bmItcKcj4h89yE0NzGc8Oc7RHCpiHm9jZx3JxHWBS_Lnwr4kbBgxD4lMiiVS0Om4g8oRckLajVr4frl4gu5uvZSMd9D4LJ7FVdM0o2_aClUgUC5j82Tf_umfVHo_3TjkpiT2y-SW8NcamVZs9BoBXNSVurL8ez3qNO5-1aUK5HzlLCbrvj7FvQ6awa9aC9_m57d5WXaWc_LM4jux1MSJspRpIXk19ov9zYG5qiMSGgtsxbqYLBowFeMe8ExPsMYTCwCJ83wNCqvFFgifeYwGzLdNlarpVsqTIRq3eSWJOKtigEONot5EpFYCGVi_8Auv1nvw"
+    }
+   }
+  ]
+ ],
+ "page_token_first_response": {
+  "search_metadata": {
+   "id": "6ac5069910c26d4488388341",
+   "status": "Success",
+   "created_at": "2026-10-06 14:32:57 UTC",
+   "google_url": "https://www.google.com/search?q=What+is+the+enterprise-tier+price+per+user%2C+in+INR%2C+for+code+hosting+platforms%3F&oq=What+is+the+enterprise-tier+price+per+user%2C+in+INR%2C+for+code+hosting+platforms%3F&hl=en&gl=in&sourceid=chrome&ie=UTF-8",
+   "processed_at": "2026-10-06 14:32:57 UTC",
+   "total_time_taken": 57.34
+  },
+  "search_parameters": {
+   "q": "What is the enterprise-tier price per user, in INR, for code hosting platforms?",
+   "gl": "in",
+   "hl": "en",
+   "device": "desktop",
+   "engine": "google",
+   "google_domain": "google.com"
+  },
+  "ai_overview": {
+   "page_token": "2zEy9niczZVZcuo4FIYX0OtovzhgM4QhVa6UZGxjEwjmhoT0i8vIQjZ4AMuE4e3upVfVK-hltGyGa8LQufehq_WAJEvn6OhwPv3f__S9cPbXb3-7STKnD4KwWq2KJIqIj4soCgSbbkIkTCKfxsh9pNEyRthzJOTGUYA54kteyLm-hENu8yFVOEQlkcOeJJpj1aZy27Am3Vlf708LI7QAiMvcSdbYpnjKTltPqWAJ7Gf2e6XFJkVaxKGlweJL860cqR9GAlbFsliuFJ8FO2B7wH_aiA7eWWekY-XqLgiA_BVvCnMB9bwjCLMuZ03YMkw73czm6g1vmZlikiwC1qz1dNtiZho57JldtT5Z0XYOTD3rFWYu61-5UC6Yk2BvGV9bIycesrSfLl1sEOYXdSCTLujrwL1szHJ_cjzLVWv3HQG90a5C9n-YN2IHHQKe_wCKu7O91YZQw8ezVcqOUQSHsAIWhXHMupLgIRdlg5imdS2_NMVIrcZPlc7Ijxf3tc263W-MPgJtPglMrWsKaMz2-ZHtYMdyLfExm5fKpXuxWak37jKmED1CRfNQacHYGjRQU61HxaciLB1wkvN_SP5K6dfhpTvCtFqVQ8mdN_1CamQ5OnGx38D-jK4M5FN4ZLWdpu0IOhusCVieFsEBIQLOcdp7--E0w-lw5sA8Wp-EqSvQy1nkb9f-fB3m-_z25HlnKbPS3Xnel6YCPj8PsgJTxo4BrPKL6WMiM6jhDoZFVd9dtJsrZVExzl6jNBUuMz1Od9faT9_z6UtzwF4NFqcBdKjo31T2LMmH01l4-wwxnD7zoF9kMc0wu615_Ym81YZf2qUcuPmEQR4frUcmbitOyLTrzgfwXR7J1fhjPWu2lqvLuETB-OdECP3fmDpIVLpBucWU_BWmmESRCxK197dzepQoYy9R15lSM6b2EpU6OkhU-0yizpma5ZnSzGx5EF2RqJ9lSr_B1NHxRabUS0yR60xlEpVnyu2aJxKlX5SoH0z9ikQNf1WiMsTwrjvVq-WUXNUtDfRey2BbE-uTpFvy-yJ5aRZEpzOA2upfdWsSJA-B7fh3luc8wLKRbJw7i32IHrDDLSSbf3PthPcon7iYx2GC43nsUVxIPBzzbIgwP2ejJcXxHe-FvN4b3PGTKOZR5GDejWjihYSf-3bCPgb0kQv8OJJEu96BluHMfPIcbuevhfa2Gq6Hb1Gy7S77q2HcomZ_VFsYPTecdcQXYk_aCmqabB0XjME2rk02973It2ao8dpuL1Fjo5LW8rXXG2yWhijPv73NpjpcG2IYOsN7pUqNAUzGIljheikadUvVp8q0T6jqW9tmYxB3zSwuKoECMhqdRR1Nq1wQI4kVUZWAngneCERAZhUmEzC0I9avgKnVWInAMqsujiLbwvRDwo5TqdXL1apo39fRpM4FJNnMpabI0TCWSv8AkftjUA",
+   "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=2zEy9niczZVZcuo4FIYX0OtovzhgM4QhVa6UZGxjEwjmhoT0i8vIQjZ4AMuE4e3upVfVK-hltGyGa8LQufehq_WAJEvn6OhwPv3f__S9cPbXb3-7STKnD4KwWq2KJIqIj4soCgSbbkIkTCKfxsh9pNEyRthzJOTGUYA54kteyLm-hENu8yFVOEQlkcOeJJpj1aZy27Am3Vlf708LI7QAiMvcSdbYpnjKTltPqWAJ7Gf2e6XFJkVaxKGlweJL860cqR9GAlbFsliuFJ8FO2B7wH_aiA7eWWekY-XqLgiA_BVvCnMB9bwjCLMuZ03YMkw73czm6g1vmZlikiwC1qz1dNtiZho57JldtT5Z0XYOTD3rFWYu61-5UC6Yk2BvGV9bIycesrSfLl1sEOYXdSCTLujrwL1szHJ_cjzLVWv3HQG90a5C9n-YN2IHHQKe_wCKu7O91YZQw8ezVcqOUQSHsAIWhXHMupLgIRdlg5imdS2_NMVIrcZPlc7Ijxf3tc263W-MPgJtPglMrWsKaMz2-ZHtYMdyLfExm5fKpXuxWak37jKmED1CRfNQacHYGjRQU61HxaciLB1wkvN_SP5K6dfhpTvCtFqVQ8mdN_1CamQ5OnGx38D-jK4M5FN4ZLWdpu0IOhusCVieFsEBIQLOcdp7--E0w-lw5sA8Wp-EqSvQy1nkb9f-fB3m-_z25HlnKbPS3Xnel6YCPj8PsgJTxo4BrPKL6WMiM6jhDoZFVd9dtJsrZVExzl6jNBUuMz1Od9faT9_z6UtzwF4NFqcBdKjo31T2LMmH01l4-wwxnD7zoF9kMc0wu615_Ym81YZf2qUcuPmEQR4frUcmbitOyLTrzgfwXR7J1fhjPWu2lqvLuETB-OdECP3fmDpIVLpBucWU_BWmmESRCxK197dzepQoYy9R15lSM6b2EpU6OkhU-0yizpma5ZnSzGx5EF2RqJ9lSr_B1NHxRabUS0yR60xlEpVnyu2aJxKlX5SoH0z9ikQNf1WiMsTwrjvVq-WUXNUtDfRey2BbE-uTpFvy-yJ5aRZEpzOA2upfdWsSJA-B7fh3luc8wLKRbJw7i32IHrDDLSSbf3PthPcon7iYx2GC43nsUVxIPBzzbIgwP2ejJcXxHe-FvN4b3PGTKOZR5GDejWjihYSf-3bCPgb0kQv8OJJEu96BluHMfPIcbuevhfa2Gq6Hb1Gy7S77q2HcomZ_VFsYPTecdcQXYk_aCmqabB0XjME2rk02973It2ao8dpuL1Fjo5LW8rXXG2yWhijPv73NpjpcG2IYOsN7pUqNAUzGIljheikadUvVp8q0T6jqW9tmYxB3zSwuKoECMhqdRR1Nq1wQI4kVUZWAngneCERAZhUmEzC0I9avgKnVWInAMqsujiLbwvRDwo5TqdXL1apo39fRpM4FJNnMpabI0TCWSv8AkftjUA"
+  }
+ }
+}

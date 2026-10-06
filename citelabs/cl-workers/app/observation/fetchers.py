@@ -65,6 +65,10 @@ OUTCOME_ANSWER = "answer"
 OUTCOME_NO_AI_ANSWER = "no_aio"
 # The engine answered but the response could not be parsed; credits were spent
 OUTCOME_PARSE_ERROR = "parse_error"
+# An AI answer with text but no source list (serpapi_aio: ai_overview without `references`)
+OUTCOME_ANSWER_NO_REFERENCES = "answer_no_references"
+# An AI answer existed (page token) but fetching its content returned nothing, even after a retry
+OUTCOME_FOLLOWUP_EMPTY = "followup_empty"
 
 
 class ObservationFetcher(ABC):
@@ -200,12 +204,14 @@ class GeminiGroundingFetcher(ObservationFetcher):
         )
 
 
-def get_observation_fetcher(name: str, model: str, serpapi_settings: Optional[Dict[str, str]] = None) -> ObservationFetcher:
+def get_observation_fetcher(
+    name: str, model: str, serpapi_settings: Optional[Dict[str, str]] = None, serpapi_min_balance: int = 0
+) -> ObservationFetcher:
     """Fetcher registry, selected by STAGE1_FETCHER."""
     if name == GeminiGroundingFetcher.name:
         return GeminiGroundingFetcher(model=model)
     from .serpapi_aio import SerpApiAIOFetcher
 
     if name == SerpApiAIOFetcher.name:
-        return SerpApiAIOFetcher(**(serpapi_settings or {}))
+        return SerpApiAIOFetcher(**(serpapi_settings or {}), min_balance=serpapi_min_balance)
     raise ValueError(f"Unknown Stage 1 observation fetcher: {name}")

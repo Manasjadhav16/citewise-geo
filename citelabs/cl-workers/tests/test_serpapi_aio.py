@@ -9,6 +9,8 @@ import pytest
 from app.observation.config import Stage1Config
 from app.observation.fetchers import (
     OUTCOME_ANSWER,
+    OUTCOME_ANSWER_NO_REFERENCES,
+    OUTCOME_FOLLOWUP_EMPTY,
     OUTCOME_NO_AI_ANSWER,
     OUTCOME_PARSE_ERROR,
     GeminiGroundingFetcher,
@@ -29,6 +31,7 @@ from app.observation import stage1_job
 from app.observation.stage1_job import aggregate_query_runs
 
 FIXTURE = json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "serpapi_smoke_2026-10-05.json")))
+PILOT = json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "serpapi_github_pilot_2026-10-06.json")))
 RUN0, RUN1 = FIXTURE["runs"]  # each: [engine=google response, engine=google_ai_overview response]
 
 KEY = "k" * 64
@@ -137,6 +140,14 @@ class TestObserve:
             run(fetcher(fake).observe("q"))
         assert info.value.credits_used == 0
 
+    def test_first_search_with_no_results_is_billed(self):
+        empty = {"search_metadata": {"id": "s1", "status": "Success"}, "error": "Google hasn't returned any results for this query."}
+        fake = FakeSerpApi([(200, empty)])
+        with pytest.raises(SerpApiError, match="billed") as info:
+            run(fetcher(fake).observe("q"))
+        assert info.value.credits_used == 1  # status Success is billed even with an error
+        assert len(info.value.raw_responses) == 1  # and stored
+
     def test_error_status_in_200_body(self):
         fake = FakeSerpApi([(200, {"search_metadata": {"id": "s1", "status": "Error"}, "error": "Google hasn't returned any results for this query."})])
         with pytest.raises(SerpApiError, match="hasn't returned any results"):
@@ -160,7 +171,7 @@ class TestStrictParsing:
         "ai_overview,message",
         [
             ({"references": []}, "no text_blocks"),
-            ({"text_blocks": []}, "no references"),
+            ({"text_blocks": [], "references": "x"}, "references is a str, expected a list"),
             ({"text_blocks": [], "references": [{"title": "no link"}]}, "reference #1 has no http link"),
             ({"text_blocks": [], "references": [{"link": "/relative"}]}, "reference #1 has no http link"),
             ({"text_blocks": "a string", "references": []}, "no text_blocks"),
@@ -207,31 +218,29 @@ def account(left):
 
 class TestCredits:
     def test_preflight_refuses_unaffordable_run_without_searching(self):
-        fake = FakeSerpApi([account(3)])
-        with pytest.raises(SerpApiCreditsError, match="up to 4 SerpApi credits .* only 3 remain"):
+        fake = FakeSerpApi([account(5)])
+        with pytest.raises(SerpApiCreditsError, match="up to 6 SerpApi credits .* only 5 remain"):
             run(fetcher(fake).preflight(planned_observations=2))
         assert len(fake.requests) == 1 and fake.requests[0].url.path == "/account.json"
 
     def test_budget_stops_requests_at_remaining(self):
-        # 1 observation planned (worst case 2) with exactly 2 left; the observation then
-        # needs a third request, which must not be sent
+        # 1 observation planned (worst case 3) with exactly 3 left; a fourth request must not be sent
         no_aio = (200, ok({"organic_results": []}))
-        fake = FakeSerpApi([account(2), no_aio, no_aio])
+        fake = FakeSerpApi([account(3), no_aio, no_aio, no_aio])
         f = fetcher(fake)
         info = run(f.preflight(planned_observations=1))
-        assert info == {"serpapi_searches_left_before": 2, "serpapi_worst_case_credits": 2}
+        assert info == {"serpapi_searches_left_before": 3, "serpapi_worst_case_credits": 3, "serpapi_min_balance": 0}
 
-        async def three():
-            await f.observe("a")
-            await f.observe("b")
-            await f.observe("c")
+        async def four():
+            for q in "abcd":
+                await f.observe(q)
 
         with pytest.raises(SerpApiCreditsError, match="request not sent"):
-            run(three())
-        assert len(fake.requests) == 3  # account + 2 searches; the third was never sent
+            run(four())
+        assert len(fake.requests) == 4  # account + 3 searches; the fourth was never sent
 
     def test_failed_requests_do_not_count_against_budget(self):
-        fake = FakeSerpApi([account(2), (500, {"error": "Internal"}), (200, ok({})), (200, ok({}))])
+        fake = FakeSerpApi([account(3), (500, {"error": "Internal"}), (200, ok({})), (200, ok({}))])
         f = fetcher(fake)
         run(f.preflight(1))
         with pytest.raises(SerpApiError):
@@ -443,3 +452,169 @@ class TestReparse:
         rebuilt = reparse_stored_response([ok({"ai_overview": {"text_blocks": [{"type": "video"}], "references": []}})])
         assert rebuilt["outcome"] == OUTCOME_PARSE_ERROR and "unknown text block type 'video'" in rebuilt["parse_error"]
         assert reparse_stored_response([ok({})])["outcome"] == OUTCOME_NO_AI_ANSWER
+
+
+
+# ---------- billed credits, answers without references, empty follow-ups ----------
+
+EMPTY = {"search_metadata": {"id": "e", "status": "Success"}, "error": "Google hasn't returned any results for this query."}
+TOKEN = (200, ok({"ai_overview": {"page_token": "TOK", "serpapi_link": "https://serpapi.com/search.json?engine=google_ai_overview&page_token=TOK"}}, "g"))
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    from app.observation import serpapi_aio
+
+    delays = []
+
+    async def fake_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr(serpapi_aio.asyncio, "sleep", fake_sleep)
+    return delays
+
+
+class TestFollowupRetry:
+    def test_empty_twice_is_followup_empty_with_all_credits_billed(self, no_sleep):
+        fake = FakeSerpApi([TOKEN, (200, EMPTY), (200, EMPTY)])
+        obs = run(fetcher(fake).observe("q"))
+        assert obs.outcome == OUTCOME_FOLLOWUP_EMPTY
+        assert obs.credits_used == 3 and obs.fetch_meta["billed_credits"] == 3
+        assert no_sleep == [5.0]  # one retry, 5 seconds after the first attempt
+        assert fake.params(1)["page_token"] == fake.params(2)["page_token"] == "TOK"  # same token
+        assert fake.params(2)["no_cache"] == "true"
+        assert obs.fetch_meta["followup_retried"] is True and obs.fetch_meta["page_token_used"] is True
+        assert len(obs.raw_responses) == 3 and obs.citations == []
+
+    def test_retry_that_succeeds_is_an_answer(self, no_sleep):
+        fake = FakeSerpApi([TOKEN, (200, EMPTY), (200, ok({"ai_overview": FULL_AIO}, "a"))])
+        obs = run(fetcher(fake).observe("q"))
+        assert obs.outcome == OUTCOME_ANSWER and obs.credits_used == 3 and len(obs.citations) == 4
+        assert obs.fetch_meta["followup_retried"] is True and no_sleep == [5.0]
+
+    def test_no_retry_without_empty_result(self, no_sleep):
+        fake = FakeSerpApi([TOKEN, (200, ok({"ai_overview": FULL_AIO}, "a"))])
+        obs = run(fetcher(fake).observe("q"))
+        assert obs.outcome == OUTCOME_ANSWER and obs.credits_used == 2 and no_sleep == []
+
+    def test_other_followup_errors_are_not_retried(self, no_sleep):
+        fake = FakeSerpApi([TOKEN, (400, {"error": "Invalid page_token or page_token expired."})])
+        with pytest.raises(SerpApiError, match="expired") as info:
+            run(fetcher(fake).observe("q"))
+        assert info.value.credits_used == 1 and no_sleep == [] and len(fake.requests) == 2
+
+    def test_billed_error_other_than_empty_is_not_retried(self, no_sleep):
+        other = {"search_metadata": {"id": "x", "status": "Success"}, "error": "Something else went wrong."}
+        fake = FakeSerpApi([TOKEN, (200, other)])
+        with pytest.raises(SerpApiError, match="Something else") as info:
+            run(fetcher(fake).observe("q"))
+        assert info.value.credits_used == 2 and no_sleep == []
+
+    def test_real_page_token_response_then_empty_twice(self, no_sleep):
+        # First response from the real pilot run whose follow-up came back empty
+        first = (200, PILOT["page_token_first_response"])
+        obs = run(fetcher(FakeSerpApi([first, (200, EMPTY), (200, EMPTY)])).observe("q"))
+        assert obs.outcome == OUTCOME_FOLLOWUP_EMPTY and obs.credits_used == 3
+
+    def test_reparse_classifies_followup_empty_and_retries(self, no_sleep):
+        assert reparse_stored_response([ok({"ai_overview": {"page_token": "T"}}), EMPTY, EMPTY])["outcome"] == OUTCOME_FOLLOWUP_EMPTY
+        rebuilt = reparse_stored_response([ok({"ai_overview": {"page_token": "T"}}), EMPTY, ok({"ai_overview": FULL_AIO})])
+        assert rebuilt["outcome"] == OUTCOME_ANSWER and len(rebuilt["citations"]) == 4
+
+
+class TestAnswerNoReferences:
+    @pytest.mark.parametrize("index", [0, 1])
+    def test_real_overviews_without_references(self, index):
+        raws = PILOT["no_references_runs"][index]
+        parsed = parse_raw_responses(raws)
+        assert parsed.outcome == OUTCOME_ANSWER_NO_REFERENCES
+        assert parsed.citations == [] and parsed.details["references_present"] is False
+        assert len(parsed.answer_text) > 200  # the overview text is kept
+
+    def test_live_observation_without_references(self):
+        obs = run(fetcher(FakeSerpApi([(200, raw) for raw in PILOT["no_references_runs"][0]])).observe("q"))
+        assert obs.outcome == OUTCOME_ANSWER_NO_REFERENCES and obs.credits_used == 2
+
+    def test_unknown_block_type_still_raises_without_references(self):
+        fake = FakeSerpApi([(200, ok({"ai_overview": {"text_blocks": [{"type": "carousel"}]}}))])
+        obs = run(fetcher(fake).observe("q"))
+        assert obs.outcome == OUTCOME_PARSE_ERROR and "unknown text block type 'carousel'" in obs.fetch_meta["parse_error"]
+
+
+class TestBalanceFloor:
+    def test_floor_refuses_run_that_could_go_below_it(self):
+        fake = FakeSerpApi([account(100)])
+        f = SerpApiAIOFetcher(api_key=KEY, transport=httpx.MockTransport(fake), min_balance=80)
+        with pytest.raises(SerpApiCreditsError, match="balance must stay at or above 80"):
+            run(f.preflight(planned_observations=7))  # 21 > 100 - 80
+
+    def test_floor_caps_the_budget(self):
+        fake = FakeSerpApi([account(189)])
+        f = SerpApiAIOFetcher(api_key=KEY, transport=httpx.MockTransport(fake), min_balance=80)
+        info = run(f.preflight(planned_observations=21))  # 63 <= 189 - 80
+        assert info["serpapi_worst_case_credits"] == 63 and f._budget.remaining == 109
+
+
+# ---------- aggregation with the new outcomes ----------
+
+def obs_run(outcome, cited=False, mention=True, credits=1, raws=None, ok_=True):
+    if not ok_:
+        return {"run_index": 0, "ok": False, "error": "x", "credits_used": credits, "raw_responses": raws}
+    cites = []
+    if outcome == OUTCOME_ANSWER:
+        cites = [ObservedCitation("https://rival.com/a", "https://rival.com/a", "rival.com", None, 1, True, True)]
+        if cited:
+            cites.append(ObservedCitation("https://acme.in/x", "https://acme.in/x", "acme.in", None, 2, True, True))
+    text = ("Acme is good." if mention else "Rival is good.") if outcome in (OUTCOME_ANSWER, OUTCOME_ANSWER_NO_REFERENCES) else ""
+    return {"run_index": 0, "ok": True, "observation": Observation(
+        answer_text=text, model="m", citations=cites, outcome=outcome, credits_used=credits, raw_responses=raws or [])}
+
+
+TOKEN_RAW = [{"ai_overview": {"page_token": "T"}}]
+
+
+class TestAggregationV3:
+    def test_metrics_with_all_outcomes(self):
+        runs = [
+            obs_run(OUTCOME_ANSWER, cited=True, credits=2, raws=TOKEN_RAW),  # cited, with references
+            obs_run(OUTCOME_ANSWER, cited=False, credits=2, raws=TOKEN_RAW),  # not cited
+            obs_run(OUTCOME_ANSWER_NO_REFERENCES, mention=False, credits=2, raws=TOKEN_RAW),
+            obs_run(OUTCOME_FOLLOWUP_EMPTY, credits=3, raws=TOKEN_RAW),
+            obs_run(OUTCOME_NO_AI_ANSWER, credits=1, raws=[{}]),
+            obs_run(OUTCOME_PARSE_ERROR, credits=2, raws=TOKEN_RAW),
+            obs_run(None, ok_=False, credits=1, raws=TOKEN_RAW),
+        ]
+        m = aggregate_query_runs(runs, "acme.in", ["Acme"], reports_activation=True)["metrics"]
+        assert m["successful_runs"] == 5  # answers x2, no-refs, followup_empty, no_aio
+        assert m["overview_retrieved_runs"] == 3 and m["rates_based_on_runs"] == 3
+        assert m["runs_with_references"] == 2
+        assert m["followup_empty_runs"] == 1 and m["parse_errors"] == 1
+        assert m["page_token_runs"] == 6  # every run but no_aio, including the failure
+        assert m["citation_rate"] == 50.0  # 1 of 2 runs with references
+        assert m["citation_rate_all_overviews"] == pytest.approx(100 / 3)  # 1 of 3 retrieved overviews
+        assert m["mention_rate"] == pytest.approx(200 / 3) and m["mention_rate_excl_absence"] == pytest.approx(200 / 3)
+        assert m["aio_runs"] == 4 and m["aio_activation_rate"] == 80.0  # (3 retrieved + 1 followup_empty) / 5
+        assert m["overall_citation_rate"] == 20.0  # 1 cited of 5 successful
+        assert m["source_set_diversity"] == 2  # pools only from runs with references
+        assert m["credits_used"] == 2 + 2 + 2 + 3 + 1 + 2 + 1
+
+    def test_stop_when_followup_empty_exceeds_fraction(self, monkeypatch):
+        from app.observation import stage1_job
+
+        calls = []
+
+        class Scripted:
+            async def observe(self, query):
+                calls.append(1)
+                return Observation(answer_text="", model="m", outcome=OUTCOME_FOLLOWUP_EMPTY, credits_used=3)
+
+        async def quiet(*a, **k):
+            return None
+
+        monkeypatch.setattr(stage1_job, "_send_progress", quiet)
+        config = Stage1Config.from_env({"runs_per_query": 4, "observation_concurrency": 1, "max_followup_empty_fraction": 0.5})
+        runs_by_query, reason = run(stage1_job._observe_all([{"q": "a", "type": "x"}, {"q": "b", "type": "x"}], Scripted(), config, "obs"))
+        assert len(calls) == 5  # stops once 5 of 8 (> half) ended as followup_empty
+        assert "5 of 8 planned runs ended as followup_empty" in reason
+        skipped = [r for runs in runs_by_query for r in runs if not r["ok"]]
+        assert len(skipped) == 3 and all("not run" in r["error"] for r in skipped)

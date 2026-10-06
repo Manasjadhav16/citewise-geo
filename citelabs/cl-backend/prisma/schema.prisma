@@ -334,6 +334,11 @@ model ObservationRun {
   evidenceSkipped          Boolean? @map("evidence_skipped") // observation-only run: no crawling or evidence extraction
   inlineLinkedRuns         Int?   @map("inline_linked_runs") // secondary: answers linking the target inline (not citations)
   inlineLinkRate           Float? @map("inline_link_rate")
+  runsWithReferences       Int?   @map("runs_with_references") // denominator of citationRate
+  citationRateAllOverviews Float? @map("citation_rate_all_overviews") // cited / all retrieved overviews (no-references runs count as not cited)
+  overviewRetrievedRuns    Int?   @map("overview_retrieved_runs") // answer + answer_no_references
+  followupEmptyRuns        Int?   @map("followup_empty_runs") // AI Overview existed but its content stayed empty after a retry
+  pageTokenRuns            Int?   @map("page_token_runs") // first response held an AI Overview page token
 
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @default(now()) @updatedAt @map("updated_at")
@@ -369,6 +374,11 @@ model ObservationQuery {
   parseErrors            Int?   @map("parse_errors")
   inlineLinkedRuns       Int?   @map("inline_linked_runs")
   inlineLinkRate         Float? @map("inline_link_rate")
+  runsWithReferences     Int?   @map("runs_with_references") // denominator of citationRate
+  citationRateAllOverviews Float? @map("citation_rate_all_overviews") // cited / all retrieved overviews (no-references runs count as not cited)
+  overviewRetrievedRuns    Int?   @map("overview_retrieved_runs") // answer + answer_no_references
+  followupEmptyRuns      Int?   @map("followup_empty_runs") // AI Overview existed but its content stayed empty after a retry
+  pageTokenRuns          Int?   @map("page_token_runs") // first response held an AI Overview page token
 
   observation ObservationRun        @relation(fields: [observationId], references: [id], onDelete: Cascade)
   responses   ObservationResponse[]
@@ -405,6 +415,7 @@ model ObservationResponse {
   snippetLinks       Json?    @map("snippet_links") // inline links in the answer text; not citations
   targetInlineLinked Boolean? @map("target_inline_linked")
   rawResponses       Json?    @map("raw_responses") // sanitized raw API responses, in call order
+  pageTokenSeen      Boolean? @map("page_token_seen") // first response held an AI Overview page token
 
   query     ObservationQuery      @relation(fields: [queryId], references: [id], onDelete: Cascade)
   citations ObservationCitation[]

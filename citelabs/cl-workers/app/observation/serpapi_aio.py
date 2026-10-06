@@ -52,6 +52,8 @@ import httpx
 from ..geo_metrics import normalize_domain
 from .fetchers import (
     OUTCOME_ANSWER,
+    OUTCOME_ANSWER_NO_REFERENCES,
+    OUTCOME_FOLLOWUP_EMPTY,
     OUTCOME_NO_AI_ANSWER,
     OUTCOME_PARSE_ERROR,
     Observation,
@@ -64,8 +66,11 @@ logger = logging.getLogger(__name__)
 SEARCH_URL = "https://serpapi.com/search.json"
 ACCOUNT_URL = "https://serpapi.com/account.json"
 VALID_DEVICES = ("desktop", "mobile", "tablet")
-# Worst case per observation: engine=google, then engine=google_ai_overview
-MAX_CREDITS_PER_OBSERVATION = 2
+# Worst case per observation: engine=google, engine=google_ai_overview, and one retry of it
+MAX_CREDITS_PER_OBSERVATION = 3
+# SerpApi's message for a search that succeeded (and is billed) but returned nothing
+EMPTY_RESULT_MARKER = "hasn't returned any results"
+FOLLOWUP_RETRY_DELAY_SECONDS = 5.0
 # Text block types the parser understands; anything else is a parse error
 KNOWN_BLOCK_TYPES = ("paragraph", "heading", "list", "table", "expandable")
 
@@ -83,6 +88,10 @@ class SerpApiFormatError(SerpApiError):
 
 class SerpApiCreditsError(SerpApiError):
     """Not enough SerpApi credits for the planned run."""
+
+
+class SerpApiEmptyResult(SerpApiError):
+    """SerpApi status Success (billed) with "Google hasn't returned any results"."""
 
 
 # ==========================================
@@ -238,8 +247,12 @@ def parse_ai_overview(ai_overview: Any) -> Tuple[str, List[ObservedCitation], Di
     references = ai_overview.get("references")
     if not isinstance(blocks, list):
         raise SerpApiFormatError(f"ai_overview has no text_blocks list (keys: {sorted(ai_overview)})")
-    if not isinstance(references, list):
-        raise SerpApiFormatError(f"ai_overview has no references list (keys: {sorted(ai_overview)})")
+    # A missing `references` key is a valid overview without sources (answer_no_references);
+    # a `references` value that is not a list is still a format error
+    references_present = "references" in ai_overview
+    if references_present and not isinstance(references, list):
+        raise SerpApiFormatError(f"ai_overview references is a {type(references).__name__}, expected a list")
+    references = references if references_present else []
 
     acc = _TextAccumulator()
     _parse_blocks(blocks, "text_blocks", acc)
@@ -262,6 +275,7 @@ def parse_ai_overview(ai_overview: Any) -> Tuple[str, List[ObservedCitation], Di
             )
         )
     details = {
+        "references_present": references_present,
         "text_block_count": len(blocks),
         "text_block_types": sorted(acc.block_types),
         "reference_count": len(references),
@@ -277,7 +291,7 @@ def parse_ai_overview(ai_overview: Any) -> Tuple[str, List[ObservedCitation], Di
 
 @dataclass
 class ParsedResponses:
-    outcome: str  # answer | no_aio
+    outcome: str  # answer | answer_no_references | no_aio | followup_empty
     answer_text: str
     citations: List[ObservedCitation]
     details: Dict[str, Any]
@@ -290,22 +304,28 @@ def _is_page_token_only(ai_overview: Any) -> bool:
 def parse_raw_responses(raw_responses: Sequence[Dict[str, Any]]) -> ParsedResponses:
     """
     Parse one observation from its raw responses, in call order: the engine=google
-    response, then the engine=google_ai_overview response when a page token was
-    followed. Used live and for re-parsing stored responses.
+    response, then the engine=google_ai_overview response(s) when a page token was
+    followed (two when the first follow-up was empty and retried; the last one
+    counts). Used live and for re-parsing stored responses.
     """
+    empty_details = {"tables_seen": 0, "ragged_table": False, "ragged_rows": 0, "inline_links": []}
     if not raw_responses:
         raise SerpApiFormatError("no raw responses")
     ai_overview = raw_responses[0].get("ai_overview")
     if ai_overview is None:
-        return ParsedResponses(OUTCOME_NO_AI_ANSWER, "", [], {"tables_seen": 0, "ragged_table": False, "ragged_rows": 0, "inline_links": []})
+        return ParsedResponses(OUTCOME_NO_AI_ANSWER, "", [], empty_details)
     if _is_page_token_only(ai_overview):
         if len(raw_responses) < 2:
             raise SerpApiFormatError("ai_overview has only a page_token and there is no google_ai_overview response")
-        if "ai_overview" not in raw_responses[1]:
-            raise SerpApiFormatError(f"google_ai_overview response has no ai_overview (keys: {sorted(raw_responses[1])})")
-        ai_overview = raw_responses[1]["ai_overview"]
+        last = raw_responses[-1]
+        if "ai_overview" not in last:
+            if EMPTY_RESULT_MARKER in str(last.get("error") or ""):
+                return ParsedResponses(OUTCOME_FOLLOWUP_EMPTY, "", [], {**empty_details, "followup_attempts": len(raw_responses) - 1})
+            raise SerpApiFormatError(f"google_ai_overview response has no ai_overview (keys: {sorted(last)})")
+        ai_overview = last["ai_overview"]
     text, citations, details = parse_ai_overview(ai_overview)
-    return ParsedResponses(OUTCOME_ANSWER, text, citations, details)
+    outcome = OUTCOME_ANSWER if details["references_present"] else OUTCOME_ANSWER_NO_REFERENCES
+    return ParsedResponses(outcome, text, citations, details)
 
 
 def reparse_stored_response(raw_responses: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -364,6 +384,7 @@ class SerpApiAIOFetcher(ObservationFetcher):
         transport: Optional[httpx.AsyncBaseTransport] = None,
         timeout: float = 60.0,
         raw_dump_dir: Optional[str] = None,
+        min_balance: int = 0,
     ):
         if device not in VALID_DEVICES:
             raise ValueError(f"device must be one of {VALID_DEVICES}")
@@ -374,6 +395,8 @@ class SerpApiAIOFetcher(ObservationFetcher):
         self._transport = transport
         self._timeout = timeout
         self._budget = _CreditBudget(None)
+        # Never plan to take the account below this many searches
+        self.min_balance = min_balance
         # Optional: also write each sanitized raw response to files here
         self.raw_dump_dir = raw_dump_dir or os.getenv("STAGE1_SERPAPI_RAW_DIR") or None
 
@@ -405,24 +428,38 @@ class SerpApiAIOFetcher(ObservationFetcher):
 
     async def preflight(self, planned_observations: int) -> Dict[str, Any]:
         """
-        Refuse the run if its worst case (2 credits per observation) exceeds the
-        account's remaining searches; otherwise cap the run's spending at that number.
+        Refuse the run if its worst case (MAX_CREDITS_PER_OBSERVATION per observation)
+        could take the account below min_balance; otherwise cap the run's spending
+        at (remaining - min_balance).
         """
         account = await self.account()
         remaining = account.get("total_searches_left")
         if not isinstance(remaining, int):
             raise SerpApiFormatError(f"account response has no integer total_searches_left (keys: {sorted(account)})")
         worst_case = planned_observations * MAX_CREDITS_PER_OBSERVATION
-        if worst_case > remaining:
+        spendable = remaining - self.min_balance
+        if worst_case > spendable:
             raise SerpApiCreditsError(
                 f"Run needs up to {worst_case} SerpApi credits ({planned_observations} observations x "
                 f"{MAX_CREDITS_PER_OBSERVATION}) but only {remaining} remain"
+                + (f" and the balance must stay at or above {self.min_balance}" if self.min_balance else "")
             )
-        self._budget = _CreditBudget(remaining)
-        return {"serpapi_searches_left_before": remaining, "serpapi_worst_case_credits": worst_case}
+        self._budget = _CreditBudget(spendable)
+        return {
+            "serpapi_searches_left_before": remaining,
+            "serpapi_worst_case_credits": worst_case,
+            "serpapi_min_balance": self.min_balance,
+        }
 
-    async def _search(self, client: httpx.AsyncClient, params: Dict[str, str]) -> Dict[str, Any]:
-        """One billable request. A credit is counted only when SerpApi reports success."""
+    async def _search(
+        self, client: httpx.AsyncClient, params: Dict[str, str], meta: Dict[str, Any], raws: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        One request. It is billed (and counted) whenever SerpApi reports
+        search_metadata.status "Success", even if the response carries an error such
+        as "Google hasn't returned any results"; every billed response is stored.
+        Unbilled failures (HTTP errors, other statuses) are not counted.
+        """
         await self._budget.take()
         try:
             response = await client.get(SEARCH_URL, params={**params, "no_cache": "true", "api_key": self.api_key})
@@ -435,9 +472,23 @@ class SerpApiAIOFetcher(ObservationFetcher):
             await self._budget.refund()
             raise SerpApiError(f"HTTP {response.status_code} with a non-JSON body")
         status = (data.get("search_metadata") or {}).get("status")
-        if response.status_code != 200 or data.get("error") or status != "Success":
+        error = data.get("error")
+        if response.status_code != 200 or status != "Success":
             await self._budget.refund()
-            raise SerpApiError(f"HTTP {response.status_code}, status {status!r}: {data.get('error') or 'no error message'}")
+            meta["calls"].append({"engine": params["engine"], "billed": False, "http": response.status_code, "status": status, "error": error})
+            raise SerpApiError(f"HTTP {response.status_code}, status {status!r}: {error or 'no error message'}")
+        # Billed
+        meta["billed_credits"] += 1
+        meta["engines_called"].append(params["engine"])
+        meta["search_ids"].append((data.get("search_metadata") or {}).get("id"))
+        meta["calls"].append({"engine": params["engine"], "billed": True, "http": 200, "status": status, "error": error})
+        clean = sanitize_for_storage(data, (self.api_key,))
+        raws.append(clean)
+        self._dump(params["engine"], clean)
+        if error:
+            if EMPTY_RESULT_MARKER in str(error):
+                raise SerpApiEmptyResult(f"HTTP 200, status 'Success' (billed): {error}")
+            raise SerpApiError(f"HTTP 200, status 'Success' (billed): {error}")
         return data
 
     def _dump(self, engine: str, data: Dict[str, Any]) -> None:
@@ -452,38 +503,56 @@ class SerpApiAIOFetcher(ObservationFetcher):
             logger.warning(f"[stage1] could not write raw SerpApi response: {exc}")
 
     async def observe(self, query: str) -> Observation:
-        meta: Dict[str, Any] = {**self.settings, "engines_called": [], "search_ids": [], "page_token_used": False}
+        meta: Dict[str, Any] = {
+            **self.settings,
+            "engines_called": [],  # billed requests, in order
+            "search_ids": [],
+            "calls": [],  # every request: engine, billed, status, error
+            "billed_credits": 0,
+            "page_token_used": False,
+            "followup_retried": False,
+        }
         raws: List[Dict[str, Any]] = []
         try:
             return await self._observe(query, meta, raws)
         except SerpApiError as exc:
-            exc.credits_used = len(meta["engines_called"])
+            exc.credits_used = meta["billed_credits"]
             exc.raw_responses = raws
             raise
 
-    async def _call(self, client: httpx.AsyncClient, params: Dict[str, str], meta: Dict[str, Any], raws: List[Dict[str, Any]]) -> Dict[str, Any]:
-        data = await self._search(client, params)
-        meta["engines_called"].append(params["engine"])
-        meta["search_ids"].append((data.get("search_metadata") or {}).get("id"))
-        clean = sanitize_for_storage(data, (self.api_key,))
-        raws.append(clean)
-        self._dump(params["engine"], clean)
-        return data
+    async def _follow_page_token(self, client: httpx.AsyncClient, token: str, meta: Dict[str, Any], raws: List[Dict[str, Any]]) -> bool:
+        """
+        Fetch the overview behind a page token. An empty ("hasn't returned any
+        results") reply is retried once after FOLLOWUP_RETRY_DELAY_SECONDS with the same
+        token. Returns False when it is still empty; other errors raise.
+        """
+        params = {"engine": "google_ai_overview", "page_token": token}
+        try:
+            await self._search(client, params, meta, raws)
+            return True
+        except SerpApiEmptyResult:
+            meta["followup_retried"] = True
+            await asyncio.sleep(FOLLOWUP_RETRY_DELAY_SECONDS)
+        try:
+            await self._search(client, params, meta, raws)
+            return True
+        except SerpApiEmptyResult:
+            return False
 
     async def _observe(self, query: str, meta: Dict[str, Any], raws: List[Dict[str, Any]]) -> Observation:
         started = time.monotonic()
         async with self._client() as client:
-            data = await self._call(
+            data = await self._search(
                 client, {"engine": "google", "q": query, "gl": self.gl, "hl": self.hl, "device": self.device}, meta, raws
             )
             ai_overview = data.get("ai_overview")
             if _is_page_token_only(ai_overview):
                 # Only a token: fetch the overview now, before the token expires
                 meta["page_token_used"] = True
-                await self._call(client, {"engine": "google_ai_overview", "page_token": ai_overview["page_token"]}, meta, raws)
+                await self._follow_page_token(client, ai_overview["page_token"], meta, raws)
 
         model = f"google_ai_overview via serpapi ({self.gl}/{self.hl}/{self.device})"
-        credits = len(meta["engines_called"])
+        credits = meta["billed_credits"]
         try:
             parsed = parse_raw_responses(raws)
         except SerpApiFormatError as exc:

@@ -47,7 +47,18 @@ from ..geo_metrics import (
 from .categorize import SourceCategory, categorize_domains
 from .config import Stage1Config
 from .evidence import compress_query_sources
-from .fetchers import OUTCOME_ANSWER, OUTCOME_PARSE_ERROR, Observation, ObservationFetcher, get_observation_fetcher
+from .fetchers import (
+    OUTCOME_ANSWER,
+    OUTCOME_ANSWER_NO_REFERENCES,
+    OUTCOME_FOLLOWUP_EMPTY,
+    OUTCOME_PARSE_ERROR,
+    Observation,
+    ObservationFetcher,
+    get_observation_fetcher,
+)
+
+# Outcomes where AI answer content was retrieved (with or without a source list)
+RETRIEVED_OUTCOMES = (OUTCOME_ANSWER, OUTCOME_ANSWER_NO_REFERENCES)
 
 logger = logging.getLogger(__name__)
 
@@ -200,57 +211,87 @@ def aggregate_query_runs(
     """
     One query's runs -> source sets, visibilities and metrics.
 
-    Runs are failed (ok=False), answered (outcome "answer"), or successful with no
-    AI answer (outcome "no_aio", e.g. Google showed no AI Overview). Mention %,
-    cited %, positions and Jaccard are over answered runs only; the activation
-    rate (answered / successful) and the overall citation rate (cited / successful)
-    are reported alongside, each with the number of runs it is based on.
+    Outcomes: failed (ok=False); parse_error (excluded, credits counted);
+    answer (overview with references); answer_no_references (overview text, no
+    source list); no_aio (no AI answer shown); followup_empty (an AI answer
+    existed, but its content could not be fetched even after a retry).
+
+    - successful runs: answer + answer_no_references + no_aio + followup_empty
+    - retrieved overviews: answer + answer_no_references. Mention % (both
+      definitions) is over retrieved overviews.
+    - cited % is reported twice: over runs with references (`citation_rate`) and
+      over all retrieved overviews (`citation_rate_all_overviews`; no-references
+      runs count as not cited). Positions are over cited runs.
+    - source pools, diversity and Jaccard use runs with references.
+    - AI answer shown (`aio_runs`): retrieved + followup_empty; activation =
+      aio_runs / successful runs. `overall_citation_rate` = cited / successful.
+    - `page_token_runs`: runs whose first response held an AI Overview page token
+      (any outcome, including failures).
     """
-    url_sets, domain_sets, visibilities, serialized = [], [], [], []
+    url_sets, domain_sets, serialized = [], [], []
+    visibilities: List[ResponseVisibility] = []  # retrieved overviews
+    visibilities_refs: List[ResponseVisibility] = []  # runs with references
     inline_linked: List[bool] = []
     mentioned_excl_absence: List[bool] = []
     pool_meta: Dict[str, Dict[str, Any]] = {}
-    successful = parse_errors = 0
+    successful = parse_errors = followup_empty = 0
+    page_tokens: List[bool] = []
     for run in runs:
+        token = _first_response_page_token(run)
+        if token is not None:
+            page_tokens.append(token)
         if not run["ok"]:
-            serialized.append(_serialize_run(run, None))
+            serialized.append(_serialize_run(run, None, page_token=token))
             continue
         obs: Observation = run["observation"]
         if obs.outcome == OUTCOME_PARSE_ERROR:
             # Answered but unparseable: not a successful observation, credits still counted
             parse_errors += 1
-            serialized.append(_serialize_run(run, None))
+            serialized.append(_serialize_run(run, None, page_token=token))
             continue
         successful += 1
-        if obs.outcome != OUTCOME_ANSWER:
-            serialized.append(_serialize_run(run, None))
+        if obs.outcome == OUTCOME_FOLLOWUP_EMPTY:
+            followup_empty += 1
+        if obs.outcome not in RETRIEVED_OUTCOMES:
+            serialized.append(_serialize_run(run, None, page_token=token))
             continue
         web = sorted((c for c in obs.citations if c.is_web_source and c.domain), key=lambda c: c.order)
-        keys = []
-        for c in web:
-            key = canonical_url(c.url) if c.url else c.domain
-            keys.append(key)
-            pool_meta.setdefault(key, {"url": c.url and canonical_url(c.url), "domain": c.domain, "title": c.title})
         visibility = detect_visibility(obs.answer_text, [c.domain for c in web], target_domain, terms)
         mentions = detect_mentions(obs.answer_text, terms)
         mentioned_excl_absence.append(mentions.mentioned_excl_absence)
+        visibilities.append(visibility)
         linked = _target_inline_linked(obs, target_domain)
         if linked is not None:
             inline_linked.append(linked)
-        url_sets.append(list(dict.fromkeys(keys)))
-        domain_sets.append(list(dict.fromkeys(c.domain for c in web)))
-        visibilities.append(visibility)
-        serialized.append(_serialize_run(run, visibility, linked, mentions))
+        if obs.outcome == OUTCOME_ANSWER:
+            keys = []
+            for c in web:
+                key = canonical_url(c.url) if c.url else c.domain
+                keys.append(key)
+                pool_meta.setdefault(key, {"url": c.url and canonical_url(c.url), "domain": c.domain, "title": c.title})
+            url_sets.append(list(dict.fromkeys(keys)))
+            domain_sets.append(list(dict.fromkeys(c.domain for c in web)))
+            visibilities_refs.append(visibility)
+        serialized.append(_serialize_run(run, visibility, linked, mentions, page_token=token))
 
+    # Mention rates and positions over retrieved overviews; diversity/Jaccard over runs with references
     metrics = query_source_metrics(url_sets, domain_sets, visibilities)
-    answered = len(url_sets)
+    retrieved = len(visibilities)
+    aio_runs = retrieved + followup_empty
+    cited_runs = sum(1 for v in visibilities if v.cited)
     metrics.update(
         {
-            "successful_runs": successful,  # answered + no-AI-answer runs
-            "rates_based_on_runs": answered,  # denominator of mention/cited %, positions, Jaccard
-            "aio_runs": answered if reports_activation else None,
-            "aio_activation_rate": _rate(answered, successful) if reports_activation else None,
-            "overall_citation_rate": _rate(sum(1 for v in visibilities if v.cited), successful),
+            "successful_runs": successful,
+            "rates_based_on_runs": retrieved,  # denominator of mention % and citation_rate_all_overviews
+            "runs_with_references": len(visibilities_refs),  # denominator of citation_rate
+            "overview_retrieved_runs": retrieved if reports_activation else None,
+            "followup_empty_runs": followup_empty if reports_activation else None,
+            "page_token_runs": sum(page_tokens) if page_tokens else None,
+            "citation_rate": citation_rate(visibilities_refs),
+            "citation_rate_all_overviews": citation_rate(visibilities),
+            "aio_runs": aio_runs if reports_activation else None,
+            "aio_activation_rate": _rate(aio_runs, successful) if reports_activation else None,
+            "overall_citation_rate": _rate(cited_runs, successful),
             "credits_used": _sum_credits(runs),
             "parse_errors": parse_errors,
             # Mentions excluding absence-of-information statements, over the same runs as mention_rate
@@ -264,8 +305,11 @@ def aggregate_query_runs(
     return {
         "url_sets": url_sets,
         "visibilities": visibilities,
+        "visibilities_refs": visibilities_refs,
         "inline_linked": inline_linked,
         "mentioned_excl_absence": mentioned_excl_absence,
+        "followup_empty": followup_empty,
+        "page_tokens": page_tokens,
         "serialized": serialized,
         "metrics": metrics,
         "pool": [
@@ -274,6 +318,15 @@ def aggregate_query_runs(
         ],
         "pool_meta": pool_meta,
     }
+
+
+def _first_response_page_token(run: Dict[str, Any]) -> Optional[bool]:
+    """Whether the run's first stored response held an AI Overview page token; None if no raw responses."""
+    raws = (run["observation"].raw_responses if run["ok"] else run.get("raw_responses")) or []
+    if not raws:
+        return None
+    ai_overview = raws[0].get("ai_overview")
+    return isinstance(ai_overview, dict) and "page_token" in ai_overview and "text_blocks" not in ai_overview
 
 
 def _target_inline_linked(obs: Observation, target_domain: str) -> Optional[bool]:
@@ -395,13 +448,17 @@ async def _observe_all(
     semaphore = asyncio.Semaphore(config.observation_concurrency)
     completed = 0
     total = len(queries) * config.runs_per_query
-    streak = {"parse_errors": 0, "stopped": False}
+    streak = {"parse_errors": 0, "stopped": False, "followup_empty": 0, "reason": None}
+    # Stop observing once followup_empty outcomes exceed this many (config fraction of all planned runs)
+    followup_empty_limit = (
+        config.max_followup_empty_fraction * total if config.max_followup_empty_fraction is not None else None
+    )
 
     async def observe(query: str) -> Observation:
         nonlocal completed
         async with semaphore:
             if streak["stopped"]:
-                raise ObservationSkipped(f"not run: stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors")
+                raise ObservationSkipped(f"not run: {streak['reason']}")
             try:
                 observation = await fetcher.observe(query)
             except Exception:
@@ -413,10 +470,19 @@ async def _observe_all(
                     await _send_progress(observation_id, "observation", "progress", {"completed": completed, "total": total})
             if observation.outcome == OUTCOME_PARSE_ERROR:
                 streak["parse_errors"] += 1
-                if streak["parse_errors"] >= MAX_CONSECUTIVE_PARSE_ERRORS:
+                if streak["parse_errors"] >= MAX_CONSECUTIVE_PARSE_ERRORS and not streak["stopped"]:
                     streak["stopped"] = True
+                    streak["reason"] = f"stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors"
             else:
                 streak["parse_errors"] = 0
+            if observation.outcome == OUTCOME_FOLLOWUP_EMPTY:
+                streak["followup_empty"] += 1
+                if followup_empty_limit is not None and streak["followup_empty"] > followup_empty_limit and not streak["stopped"]:
+                    streak["stopped"] = True
+                    streak["reason"] = (
+                        f"stopped: {streak['followup_empty']} of {total} planned runs ended as followup_empty "
+                        f"(limit: more than {config.max_followup_empty_fraction:.0%})"
+                    )
             return observation
 
     runs_by_query: List[List[Dict[str, Any]]] = []
@@ -436,7 +502,7 @@ async def _observe_all(
             else:
                 runs.append({"run_index": run_index, "ok": True, "observation": outcome})
         runs_by_query.append(runs)
-    return runs_by_query, streak["stopped"]
+    return runs_by_query, streak["reason"]
 
 
 async def _crawl_sources(urls: Sequence[str], concurrency: int) -> Dict[str, Dict[str, Optional[str]]]:
@@ -463,6 +529,7 @@ def _serialize_run(
     visibility: Optional[ResponseVisibility],
     target_inline_linked: Optional[bool] = None,
     mentions: Optional[MentionCheck] = None,
+    page_token: Optional[bool] = None,
 ) -> Dict[str, Any]:
     if not run["ok"]:
         return {
@@ -471,6 +538,7 @@ def _serialize_run(
             "error": run["error"],
             "outcome": "error",
             "credits_used": run.get("credits_used"),
+            "page_token_seen": page_token,
             "raw_responses": run.get("raw_responses"),
             "citations": [],
         }
@@ -481,6 +549,7 @@ def _serialize_run(
         "error": None,
         "outcome": obs.outcome,
         "credits_used": obs.credits_used,
+        "page_token_seen": page_token,
         "fetch_meta": {k: v for k, v in obs.fetch_meta.items() if k != "inline_links"},
         "parse_error": obs.fetch_meta.get("parse_error"),
         "tables_seen": obs.fetch_meta.get("tables_seen"),
@@ -511,7 +580,9 @@ async def run_stage1_job(
     result: Dict[str, Any] = {"observation_id": observation_id, "sandbox_url": url, "status": "running"}
     try:
         config = Stage1Config.from_env(config_overrides)
-        fetcher = fetcher or get_observation_fetcher(config.fetcher, config.grounding_model, config.serpapi_settings)
+        fetcher = fetcher or get_observation_fetcher(
+            config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance
+        )
         target_domain = normalize_domain(url)
         result.update(
             {
@@ -538,7 +609,8 @@ async def run_stage1_job(
         await _send_progress(observation_id, "query_selection", "success", {"queries": [q["q"] for q in selected]})
 
         await _send_progress(observation_id, "observation", "started", {"total": len(selected) * config.runs_per_query})
-        runs_by_query, stopped = await _observe_all(selected, fetcher, config, observation_id)
+        runs_by_query, stop_reason = await _observe_all(selected, fetcher, config, observation_id)
+        stopped = stop_reason is not None
 
         # Per-query source pools
         query_records: List[Dict[str, Any]] = []
@@ -558,6 +630,7 @@ async def run_stage1_job(
                     "_visibilities": aggregated["visibilities"],
                     "_inline_linked": aggregated["inline_linked"],
                     "_mentioned_excl_absence": aggregated["mentioned_excl_absence"],
+                    "_visibilities_refs": aggregated["visibilities_refs"],
                 }
             )
         attempted = len(selected) * config.runs_per_query
@@ -565,11 +638,12 @@ async def run_stage1_job(
         await _send_progress(observation_id, "observation", "success", {"attempted": attempted, "succeeded": succeeded})
 
         if stopped:
-            message = f"Stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors; remaining observations were not run"
+            message = f"{stop_reason[0].upper()}{stop_reason[1:]}; remaining observations were not run"
             for record in query_records:
                 record.pop("_visibilities")
                 record.pop("_inline_linked")
                 record.pop("_mentioned_excl_absence")
+                record.pop("_visibilities_refs")
                 record.pop("pool")
                 record["sources"] = []
                 record["target_evidence"] = None
@@ -578,6 +652,7 @@ async def run_stage1_job(
                 "runs_attempted": attempted,
                 "runs_succeeded": succeeded,
                 "parse_errors": sum(r["metrics"]["parse_errors"] for r in query_records),
+                "followup_empty_runs": sum(r["metrics"]["followup_empty_runs"] or 0 for r in query_records),
                 "credits_used": _sum_credits([run for runs in runs_by_query for run in runs]),
             }
             result["queries"] = query_records
@@ -697,6 +772,11 @@ async def run_stage1_job(
         all_visibilities = [v for r in query_records for v in r.pop("_visibilities")]
         all_inline_linked = [v for r in query_records for v in r.pop("_inline_linked")]
         all_mentioned_excl_absence = [v for r in query_records for v in r.pop("_mentioned_excl_absence")]
+        all_visibilities_refs = [v for r in query_records for v in r.pop("_visibilities_refs")]
+
+        def total(key: str) -> Optional[int]:
+            values = [r["metrics"][key] for r in query_records if r["metrics"][key] is not None]
+            return sum(values) if values else None
         citation_categories = [
             (categories[c["domain"]].category if c["domain"] in categories else "other", categories[c["domain"]].competitor_group if c["domain"] in categories else "ai_visibility")
             for r in query_records
@@ -717,7 +797,12 @@ async def run_stage1_job(
             "unique_domains": len(categories),
             "mention_rate": mention_rate(all_visibilities),
             "mention_rate_excl_absence": _rate(sum(all_mentioned_excl_absence), len(all_mentioned_excl_absence)),
-            "citation_rate": citation_rate(all_visibilities),
+            "citation_rate": citation_rate(all_visibilities_refs),
+            "citation_rate_all_overviews": citation_rate(all_visibilities),
+            "runs_with_references": len(all_visibilities_refs),
+            "overview_retrieved_runs": total("overview_retrieved_runs"),
+            "followup_empty_runs": total("followup_empty_runs"),
+            "page_token_runs": total("page_token_runs"),
             "mean_citation_position": mean_citation_position(v.citation_position for v in all_visibilities),
             "median_citation_position": median_citation_position(v.citation_position for v in all_visibilities),
             "mean_source_set_diversity": mean_of("source_set_diversity"),
@@ -725,8 +810,8 @@ async def run_stage1_job(
             "mean_domain_set_stability": mean_of("domain_set_stability"),
             # Rates above are over runs with an AI answer; these put them in context
             "rates_based_on_runs": len(all_visibilities),
-            "aio_runs": len(all_visibilities) if fetcher.reports_activation else None,
-            "aio_activation_rate": _rate(len(all_visibilities), succeeded) if fetcher.reports_activation else None,
+            "aio_runs": total("aio_runs") if fetcher.reports_activation else None,
+            "aio_activation_rate": _rate(total("aio_runs") or 0, succeeded) if fetcher.reports_activation else None,
             "overall_citation_rate": _rate(sum(1 for v in all_visibilities if v.cited), succeeded),
             "credits_used": _sum_credits([run for runs in runs_by_query for run in runs]),
             "parse_errors": sum(r["metrics"]["parse_errors"] for r in query_records),

@@ -215,6 +215,8 @@ class Stage1StartRequest(BaseModel):
     serpapi_hl: Optional[str] = None  # overrides STAGE1_SERPAPI_HL
     serpapi_device: Optional[str] = None  # overrides STAGE1_SERPAPI_DEVICE
     skip_evidence: Optional[bool] = None  # overrides STAGE1_SKIP_EVIDENCE: observation-only run
+    serpapi_min_balance: Optional[int] = None  # overrides STAGE1_SERPAPI_MIN_BALANCE
+    max_followup_empty_fraction: Optional[float] = None  # overrides STAGE1_MAX_FOLLOWUP_EMPTY_FRACTION
 
 
 @app.post("/stage1/start")
@@ -238,6 +240,8 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
         "serpapi_hl": payload.serpapi_hl,
         "serpapi_device": payload.serpapi_device,
         "skip_evidence": payload.skip_evidence,
+        "serpapi_min_balance": payload.serpapi_min_balance,
+        "max_followup_empty_fraction": payload.max_followup_empty_fraction,
     }
     try:
         config = Stage1Config.from_env(overrides)  # reject invalid config before starting
@@ -251,7 +255,9 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
 
         planned = (len([q for q in payload.queries if q.strip()]) if payload.queries else config.query_count) * config.runs_per_query
         try:
-            await get_observation_fetcher(config.fetcher, config.grounding_model, config.serpapi_settings).preflight(planned)
+            await get_observation_fetcher(
+                config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance
+            ).preflight(planned)
         except (SerpApiError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     asyncio.create_task(
