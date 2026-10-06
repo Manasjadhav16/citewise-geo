@@ -16,6 +16,7 @@ Google AI Overviews fetched through SerpApi (`serpapi_aio`, gl=in, hl=en, deskto
 | obs_github_pilot_1791297109 | 15 | 207 → 189 | 18 | 3 |
 | obs_github_pilot_A_1791298362 | 40 | 189 → 147 | 42 | 2 |
 | obs_github_pilot_B_1791300066 | 20 | 147 → 127 | 20 | 0 |
+| obs_github_pilot_B2_1791302154 | 6 | 128 → 122 | 6 | 0 |
 
 ## Per question
 
@@ -36,5 +37,37 @@ Google AI Overviews fetched through SerpApi (`serpapi_aio`, gl=in, hl=en, deskto
 | obs_github_pilot_B_1791300066 | Q7 | How can dependencies be scanned automatically for security vulnerabilities on a code hosting platform? *(reconstructed)* | 3 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | 1 | https://docs.github.com/en/enterprise-server@3.20/code-security/concepts/vulnerability-reporting-and-management/vulnerability-exposure (1 run) | – | 1/1 | 1/1 | 5 | 0 | run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
 | obs_github_pilot_B_1791300066 | Q9 | How well does a code hosting platform integrate with Jira for sprint planning? *(reconstructed)* | 3 | 0 | 0 | 0 | 2 | 0 | 0 | 1 | 0 | 0 | – | – | 0/0 | 0/0 | 6 | 0 | run 2: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
 | obs_github_pilot_B_1791300066 | Q10 | What code review features help senior developers mentor junior developers who work remotely? *(reconstructed)* | 3 | 0 | 1 | 0 | 0 | 1 | 0 | 1 | 0 | 0 | – | – | 1/1 | 1/1 | 3 | 1 | run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
+| obs_github_pilot_B2_1791302154 | Q6 | How do code hosting platforms handle automated CI/CD pipelines? *(reconstructed)* | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 0 | – | – | 1/1 | 1/1 | 2 | 0 | run 0: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored; run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
+| obs_github_pilot_B2_1791302154 | Q7 | How can dependencies be scanned automatically for security vulnerabilities on a code hosting platform? *(reconstructed)* | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 1 | https://github.com/Protik49/Security-Auditing-of-Open-Source-Dependencies (1 run) | – | 1/1 | 1/1 | 2 | 0 | run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored; run 2: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
+| obs_github_pilot_B2_1791302154 | Q9 | How well does a code hosting platform integrate with Jira for sprint planning? *(reconstructed)* | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 0 | – | – | 1/1 | 1/1 | 2 | 0 | run 0: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored; run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
+| obs_github_pilot_B2_1791302154 | Q10 | What code review features help senior developers mentor junior developers who work remotely? *(reconstructed)* | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 0 | 0 | – | – | 0/0 | 0/0 | 0 | – | run 0: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored; run 1: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored; run 2: SerpApi HTTP 503 "couldn't get valid results"; not billed, nothing stored |
 
 No absence sentences were recorded in any retrieved overview.
+
+## Totals (all observations, stored values)
+
+Runs attempted: 57 across 19 question-observation rows (14 distinct questions).
+
+| Outcome | Runs |
+|---|---|
+| answer | 27 |
+| answer_no_references | 2 |
+| no_aio | 0 |
+| followup_empty | 5 |
+| timeout | 1 |
+| parse_error | 2 |
+| error | 20 |
+
+- Questions with at least one retrieved overview: 14 of 14 (Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q9, Q10, Q11, Q12, Q13, Q14, Q15).
+- Questions with at least one run citing a github.com page: 4 of 14 (Q6, Q7, Q11, Q14).
+  - Q6: obs_github_pilot_B_1791300066: 1 run(s)
+  - Q7: obs_github_pilot_B_1791300066: 1 run(s); obs_github_pilot_B2_1791302154: 1 run(s)
+  - Q11: obs_github_pilot_1791297109: 1 run(s); obs_github_pilot_A_1791298362: 2 run(s)
+  - Q14: obs_github_pilot_A_1791298362: 3 run(s)
+
+`error` runs by stored error text: SerpApi HTTP 503 (not billed): 15; empty AI Overview follow-up, pre-fix fetcher: 3; client-side timeout, pre-fix fetcher: 2.
+
+Stored stop reasons:
+- obs_github_pilot_B2_1791302154: Stopped: 7 of 12 planned runs ended as error, followup_empty or timeout (limit: more than 50%); remaining observations were not run
+
+Balance outside the runs: between obs_github_pilot_B_1791300066 and obs_github_pilot_B2_1791302154 the balance went from 127 to 128, with no searches by these runs in between.

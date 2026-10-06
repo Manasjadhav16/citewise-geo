@@ -20,6 +20,7 @@ BALANCES = {
     "obs_github_pilot_1791297109": (207, 189),
     "obs_github_pilot_A_1791298362": (189, 147),
     "obs_github_pilot_B_1791300066": (147, 127),
+    "obs_github_pilot_B2_1791302154": (128, 122),
 }
 OUTCOMES = ("answer", "answer_no_references", "no_aio", "followup_empty", "timeout", "parse_error", "error")
 
@@ -99,6 +100,61 @@ def cell(v):
     return str(v).replace("|", "\\|") if v not in ("", None) else "–"
 
 
+def error_causes(observations):
+    """Count stored `error` outcomes by the stored error text."""
+    causes = Counter()
+    for o in observations:
+        for q in o["queries"]:
+            for r in q["responses"]:
+                if (r["outcome"] or "error") != "error":
+                    continue
+                err = r.get("error") or ""
+                causes["SerpApi HTTP 503 (not billed)" if "HTTP 503" in err
+                       else "empty AI Overview follow-up, pre-fix fetcher" if "hasn't returned any results" in err
+                       else "client-side timeout, pre-fix fetcher" if "ReadTimeout" in err
+                       else "other"] += 1
+    return causes
+
+
+def totals_section(rows, observations):
+    """Totals over all rows (all observations), from stored values only."""
+    total_runs = sum(r["runs_attempted"] for r in rows)
+    by_question = {}
+    for r in rows:
+        by_question.setdefault(r["table_ii_q"], []).append(r)
+    retrieved_qs = sorted(q for q, rs in by_question.items() if any(r["retrieved_overviews"] for r in rs))
+    cited_qs = sorted(q for q, rs in by_question.items() if any(r["runs_github_com_cited"] for r in rs))
+    out = ["", "## Totals (all observations, stored values)", "",
+           f"Runs attempted: {total_runs} across {len(rows)} question-observation rows "
+           f"({len(by_question)} distinct questions).", "",
+           "| Outcome | Runs |", "|---|---|"]
+    out += [f"| {o} | {sum(r[f'n_{o}'] for r in rows)} |" for o in OUTCOMES]
+    out += ["",
+            f"- Questions with at least one retrieved overview: {len(retrieved_qs)} of {len(by_question)} "
+            f"({', '.join(f'Q{q}' for q in retrieved_qs)}).",
+            f"- Questions with at least one run citing a github.com page: {len(cited_qs)} of {len(by_question)} "
+            f"({', '.join(f'Q{q}' for q in cited_qs)})."]
+    causes = error_causes(observations)
+    for q in cited_qs:
+        out.append(f"  - Q{q}: " + "; ".join(
+            f"{r['observation_id']}: {r['runs_github_com_cited']} run(s)" for r in by_question[q] if r["runs_github_com_cited"]))
+    out += ["", "`error` runs by stored error text: " + "; ".join(f"{c}: {n}" for c, n in causes.most_common()) + "."]
+    stops = [(o["id"], o["error"]) for o in observations if o.get("error")]
+    if stops:
+        out += ["", "Stored stop reasons:"] + [f"- {i}: {e}" for i, e in stops]
+    gaps = []
+    ordered = [BALANCES[o["id"]] for o in observations]
+    for (o1, (_, after)), (o2, (before, _)) in zip(
+            [(o["id"], b) for o, b in zip(observations, ordered)][:-1],
+            [(o["id"], b) for o, b in zip(observations, ordered)][1:]):
+        if after != before:
+            gaps.append(f"between {o1} and {o2} the balance went from {after} to {before}, "
+                        "with no searches by these runs in between")
+    if gaps:
+        out += ["", "Balance outside the runs: " + "; ".join(gaps) + "."]
+    return out
+
+
 def write_markdown(path, rows, observations):
     lines = [
         "# GitHub real-AIO pilot: combined per-question table",
@@ -148,6 +204,7 @@ def write_markdown(path, rows, observations):
             r["credits_counted"], r["credits_assumed"], r["notes"]]) + " |")
     lines += ["", "No absence sentences were recorded in any retrieved overview."
               if not any(r["absence_sentences"] for r in rows) else "Absence sentences are in the CSV."]
+    lines += totals_section(rows, observations)
     open(path, "w").write("\n".join(lines) + "\n")
 
 
