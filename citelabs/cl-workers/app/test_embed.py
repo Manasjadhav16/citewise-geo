@@ -16,7 +16,7 @@
 
 # async def test_embed(text: str):
 #     # api_key = os.getenv("GEMINI_API_KEY")
-#     api_key = "AIzaSyBvQb_Kq065jUBcRyyPJWV1ngDY8xoaf0o"
+#     api_key = "your_gemini_api_key_here"
 
 #     if not api_key:
 #         print("❌ ERROR: GEMINI_API_KEY missing in environment!")

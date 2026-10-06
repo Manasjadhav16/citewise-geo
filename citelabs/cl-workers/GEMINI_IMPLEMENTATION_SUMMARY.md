@@ -56,7 +56,7 @@ OLLAMA_MODEL=llama3.1
 
 # Use Gemini (cloud, requires API key)
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=AIzaSyA_Dbv7nkFjkAUYq4mS5o5IBvg5VTSAec0
+GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-1.5-flash
 ```
 
@@ -172,7 +172,7 @@ LLM_PROVIDER=ollama
 
 Your Gemini API key is configured in `.env`:
 ```bash
-GEMINI_API_KEY=AIzaSyA_Dbv7nkFjkAUYq4mS5o5IBvg5VTSAec0
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 **Security Notes:**
