@@ -52,6 +52,7 @@ from .fetchers import (
     OUTCOME_ANSWER_NO_REFERENCES,
     OUTCOME_FOLLOWUP_EMPTY,
     OUTCOME_PARSE_ERROR,
+    OUTCOME_TIMEOUT,
     Observation,
     ObservationFetcher,
     get_observation_fetcher,
@@ -234,7 +235,7 @@ def aggregate_query_runs(
     inline_linked: List[bool] = []
     mentioned_excl_absence: List[bool] = []
     pool_meta: Dict[str, Dict[str, Any]] = {}
-    successful = parse_errors = followup_empty = 0
+    successful = parse_errors = followup_empty = timeouts = 0
     page_tokens: List[bool] = []
     for run in runs:
         token = _first_response_page_token(run)
@@ -247,6 +248,11 @@ def aggregate_query_runs(
         if obs.outcome == OUTCOME_PARSE_ERROR:
             # Answered but unparseable: not a successful observation, credits still counted
             parse_errors += 1
+            serialized.append(_serialize_run(run, None, page_token=token))
+            continue
+        if obs.outcome == OUTCOME_TIMEOUT:
+            # AI Overview status unknown: not a successful observation; its credit is assumed billed
+            timeouts += 1
             serialized.append(_serialize_run(run, None, page_token=token))
             continue
         successful += 1
@@ -286,6 +292,8 @@ def aggregate_query_runs(
             "runs_with_references": len(visibilities_refs),  # denominator of citation_rate
             "overview_retrieved_runs": retrieved if reports_activation else None,
             "followup_empty_runs": followup_empty if reports_activation else None,
+            "timeout_runs": timeouts if reports_activation else None,
+            "credits_assumed": _sum_assumed(runs),
             "page_token_runs": sum(page_tokens) if page_tokens else None,
             "citation_rate": citation_rate(visibilities_refs),
             "citation_rate_all_overviews": citation_rate(visibilities),
@@ -318,6 +326,13 @@ def aggregate_query_runs(
         ],
         "pool_meta": pool_meta,
     }
+
+
+def _sum_assumed(runs: Sequence[Dict[str, Any]]) -> Optional[int]:
+    """Credits counted as billed without confirmation (client-side timeouts)."""
+    values = [run["observation"].fetch_meta.get("assumed_billed_credits") for run in runs if run["ok"]]
+    values = [v for v in values if v is not None]
+    return sum(values) if values else None
 
 
 def _first_response_page_token(run: Dict[str, Any]) -> Optional[bool]:
@@ -448,10 +463,10 @@ async def _observe_all(
     semaphore = asyncio.Semaphore(config.observation_concurrency)
     completed = 0
     total = len(queries) * config.runs_per_query
-    streak = {"parse_errors": 0, "stopped": False, "followup_empty": 0, "reason": None}
-    # Stop observing once followup_empty outcomes exceed this many (config fraction of all planned runs)
-    followup_empty_limit = (
-        config.max_followup_empty_fraction * total if config.max_followup_empty_fraction is not None else None
+    streak = {"parse_errors": 0, "stopped": False, "unretrieved": 0, "reason": None}
+    # Stop observing once followup_empty + timeout outcomes exceed this many (config fraction of all planned runs)
+    unretrieved_limit = (
+        config.max_unretrieved_fraction * total if config.max_unretrieved_fraction is not None else None
     )
 
     async def observe(query: str) -> Observation:
@@ -475,13 +490,13 @@ async def _observe_all(
                     streak["reason"] = f"stopped after {MAX_CONSECUTIVE_PARSE_ERRORS} consecutive parse errors"
             else:
                 streak["parse_errors"] = 0
-            if observation.outcome == OUTCOME_FOLLOWUP_EMPTY:
-                streak["followup_empty"] += 1
-                if followup_empty_limit is not None and streak["followup_empty"] > followup_empty_limit and not streak["stopped"]:
+            if observation.outcome in (OUTCOME_FOLLOWUP_EMPTY, OUTCOME_TIMEOUT):
+                streak["unretrieved"] += 1
+                if unretrieved_limit is not None and streak["unretrieved"] > unretrieved_limit and not streak["stopped"]:
                     streak["stopped"] = True
                     streak["reason"] = (
-                        f"stopped: {streak['followup_empty']} of {total} planned runs ended as followup_empty "
-                        f"(limit: more than {config.max_followup_empty_fraction:.0%})"
+                        f"stopped: {streak['unretrieved']} of {total} planned runs ended as followup_empty or timeout "
+                        f"(limit: more than {config.max_unretrieved_fraction:.0%})"
                     )
             return observation
 
@@ -549,6 +564,7 @@ def _serialize_run(
         "error": None,
         "outcome": obs.outcome,
         "credits_used": obs.credits_used,
+        "credits_assumed": obs.fetch_meta.get("assumed_billed_credits"),
         "page_token_seen": page_token,
         "fetch_meta": {k: v for k, v in obs.fetch_meta.items() if k != "inline_links"},
         "parse_error": obs.fetch_meta.get("parse_error"),
@@ -581,7 +597,8 @@ async def run_stage1_job(
     try:
         config = Stage1Config.from_env(config_overrides)
         fetcher = fetcher or get_observation_fetcher(
-            config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance
+            config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance,
+            config.serpapi_timeout_seconds,
         )
         target_domain = normalize_domain(url)
         result.update(
@@ -653,6 +670,8 @@ async def run_stage1_job(
                 "runs_succeeded": succeeded,
                 "parse_errors": sum(r["metrics"]["parse_errors"] for r in query_records),
                 "followup_empty_runs": sum(r["metrics"]["followup_empty_runs"] or 0 for r in query_records),
+                "timeout_runs": sum(r["metrics"]["timeout_runs"] or 0 for r in query_records),
+                "credits_assumed": sum(r["metrics"]["credits_assumed"] or 0 for r in query_records),
                 "credits_used": _sum_credits([run for runs in runs_by_query for run in runs]),
             }
             result["queries"] = query_records
@@ -802,6 +821,8 @@ async def run_stage1_job(
             "runs_with_references": len(all_visibilities_refs),
             "overview_retrieved_runs": total("overview_retrieved_runs"),
             "followup_empty_runs": total("followup_empty_runs"),
+            "timeout_runs": total("timeout_runs"),
+            "credits_assumed": total("credits_assumed"),
             "page_token_runs": total("page_token_runs"),
             "mean_citation_position": mean_citation_position(v.citation_position for v in all_visibilities),
             "median_citation_position": median_citation_position(v.citation_position for v in all_visibilities),

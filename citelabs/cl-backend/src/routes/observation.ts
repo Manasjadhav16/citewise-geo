@@ -51,8 +51,9 @@ type WorkerRun = {
   run_index: number;
   ok: boolean;
   error: string | null;
-  outcome?: string; // answer | answer_no_references | no_aio | followup_empty | parse_error | error
+  outcome?: string; // answer | answer_no_references | no_aio | followup_empty | timeout | parse_error | error
   page_token_seen?: boolean | null;
+  credits_assumed?: number | null;
   credits_used?: number | null;
   fetch_meta?: Record<string, unknown> | null;
   parse_error?: string | null;
@@ -125,6 +126,8 @@ type WorkerQuery = {
     overview_retrieved_runs?: number | null;
     followup_empty_runs?: number | null;
     page_token_runs?: number | null;
+    timeout_runs?: number | null;
+    credits_assumed?: number | null;
   };
 };
 
@@ -300,6 +303,8 @@ export default async function observationRoutes(app: FastifyInstance) {
         overviewRetrievedRuns: q.metrics.overview_retrieved_runs ?? null,
         followupEmptyRuns: q.metrics.followup_empty_runs ?? null,
         pageTokenRuns: q.metrics.page_token_runs ?? null,
+        timeoutRuns: q.metrics.timeout_runs ?? null,
+        creditsAssumed: q.metrics.credits_assumed ?? null,
         targetEvidence: toJson(q.target_evidence),
       });
 
@@ -332,6 +337,7 @@ export default async function observationRoutes(app: FastifyInstance) {
           targetInlineLinked: r.target_inline_linked ?? null,
           rawResponses: toJson(r.raw_responses),
           pageTokenSeen: r.page_token_seen ?? null,
+          creditsAssumed: r.credits_assumed ?? null,
         });
         for (const c of r.citations) {
           citationRows.push({
@@ -419,6 +425,8 @@ export default async function observationRoutes(app: FastifyInstance) {
           overviewRetrievedRuns: m.overview_retrieved_runs ?? null,
           followupEmptyRuns: m.followup_empty_runs ?? null,
           pageTokenRuns: m.page_token_runs ?? null,
+          timeoutRuns: m.timeout_runs ?? null,
+          creditsAssumed: m.credits_assumed ?? null,
           categoryBreakdown: toJson(m.category_breakdown),
           competitorGroupBreakdown: toJson(m.competitor_group_breakdown),
           sourceCategories: toJson(result.source_categories),
@@ -458,7 +466,7 @@ export default async function observationRoutes(app: FastifyInstance) {
               orderBy: { runIndex: 'asc' },
               ...(includeRaw
                 ? { include: { citations: { orderBy: { position: 'asc' } } } }
-                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, targetMentionedExclAbsence: true, mentionSentences: true, absenceSentences: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true, pageTokenSeen: true } }),
+                : { select: { id: true, runIndex: true, ok: true, error: true, model: true, latencySeconds: true, targetMentioned: true, targetCited: true, targetPosition: true, targetMentionedExclAbsence: true, mentionSentences: true, absenceSentences: true, outcome: true, creditsUsed: true, parseError: true, tablesSeen: true, raggedTable: true, targetInlineLinked: true, snippetLinks: true, pageTokenSeen: true, creditsAssumed: true } }),
             },
           },
         },

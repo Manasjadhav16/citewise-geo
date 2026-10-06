@@ -216,7 +216,8 @@ class Stage1StartRequest(BaseModel):
     serpapi_device: Optional[str] = None  # overrides STAGE1_SERPAPI_DEVICE
     skip_evidence: Optional[bool] = None  # overrides STAGE1_SKIP_EVIDENCE: observation-only run
     serpapi_min_balance: Optional[int] = None  # overrides STAGE1_SERPAPI_MIN_BALANCE
-    max_followup_empty_fraction: Optional[float] = None  # overrides STAGE1_MAX_FOLLOWUP_EMPTY_FRACTION
+    serpapi_timeout_seconds: Optional[float] = None  # overrides STAGE1_SERPAPI_TIMEOUT_SECONDS
+    max_unretrieved_fraction: Optional[float] = None  # overrides STAGE1_MAX_UNRETRIEVED_FRACTION
 
 
 @app.post("/stage1/start")
@@ -241,7 +242,8 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
         "serpapi_device": payload.serpapi_device,
         "skip_evidence": payload.skip_evidence,
         "serpapi_min_balance": payload.serpapi_min_balance,
-        "max_followup_empty_fraction": payload.max_followup_empty_fraction,
+        "serpapi_timeout_seconds": payload.serpapi_timeout_seconds,
+        "max_unretrieved_fraction": payload.max_unretrieved_fraction,
     }
     try:
         config = Stage1Config.from_env(overrides)  # reject invalid config before starting
@@ -256,7 +258,8 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
         planned = (len([q for q in payload.queries if q.strip()]) if payload.queries else config.query_count) * config.runs_per_query
         try:
             await get_observation_fetcher(
-                config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance
+                config.fetcher, config.grounding_model, config.serpapi_settings, config.serpapi_min_balance,
+                config.serpapi_timeout_seconds,
             ).preflight(planned)
         except (SerpApiError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))

@@ -339,6 +339,8 @@ model ObservationRun {
   overviewRetrievedRuns    Int?   @map("overview_retrieved_runs") // answer + answer_no_references
   followupEmptyRuns        Int?   @map("followup_empty_runs") // AI Overview existed but its content stayed empty after a retry
   pageTokenRuns            Int?   @map("page_token_runs") // first response held an AI Overview page token
+  timeoutRuns              Int?   @map("timeout_runs") // first search timed out on the client side
+  creditsAssumed           Int?   @map("credits_assumed") // credits counted as billed without confirmation (timeouts)
 
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @default(now()) @updatedAt @map("updated_at")
@@ -379,6 +381,8 @@ model ObservationQuery {
   overviewRetrievedRuns    Int?   @map("overview_retrieved_runs") // answer + answer_no_references
   followupEmptyRuns      Int?   @map("followup_empty_runs") // AI Overview existed but its content stayed empty after a retry
   pageTokenRuns          Int?   @map("page_token_runs") // first response held an AI Overview page token
+  timeoutRuns              Int?   @map("timeout_runs") // first search timed out on the client side
+  creditsAssumed           Int?   @map("credits_assumed") // credits counted as billed without confirmation (timeouts)
 
   observation ObservationRun        @relation(fields: [observationId], references: [id], onDelete: Cascade)
   responses   ObservationResponse[]
@@ -416,6 +420,7 @@ model ObservationResponse {
   targetInlineLinked Boolean? @map("target_inline_linked")
   rawResponses       Json?    @map("raw_responses") // sanitized raw API responses, in call order
   pageTokenSeen      Boolean? @map("page_token_seen") // first response held an AI Overview page token
+  creditsAssumed     Int?     @map("credits_assumed") // part of creditsUsed counted as billed without confirmation (timeouts)
 
   query     ObservationQuery      @relation(fields: [queryId], references: [id], onDelete: Cascade)
   citations ObservationCitation[]

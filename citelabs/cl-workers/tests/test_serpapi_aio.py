@@ -13,6 +13,7 @@ from app.observation.fetchers import (
     OUTCOME_FOLLOWUP_EMPTY,
     OUTCOME_NO_AI_ANSWER,
     OUTCOME_PARSE_ERROR,
+    OUTCOME_TIMEOUT,
     GeminiGroundingFetcher,
     Observation,
     ObservedCitation,
@@ -598,7 +599,7 @@ class TestAggregationV3:
         assert m["source_set_diversity"] == 2  # pools only from runs with references
         assert m["credits_used"] == 2 + 2 + 2 + 3 + 1 + 2 + 1
 
-    def test_stop_when_followup_empty_exceeds_fraction(self, monkeypatch):
+    def test_stop_when_unretrieved_exceeds_fraction(self, monkeypatch):
         from app.observation import stage1_job
 
         calls = []
@@ -612,9 +613,89 @@ class TestAggregationV3:
             return None
 
         monkeypatch.setattr(stage1_job, "_send_progress", quiet)
-        config = Stage1Config.from_env({"runs_per_query": 4, "observation_concurrency": 1, "max_followup_empty_fraction": 0.5})
+        config = Stage1Config.from_env({"runs_per_query": 4, "observation_concurrency": 1, "max_unretrieved_fraction": 0.5})
         runs_by_query, reason = run(stage1_job._observe_all([{"q": "a", "type": "x"}, {"q": "b", "type": "x"}], Scripted(), config, "obs"))
         assert len(calls) == 5  # stops once 5 of 8 (> half) ended as followup_empty
-        assert "5 of 8 planned runs ended as followup_empty" in reason
+        assert "5 of 8 planned runs ended as followup_empty or timeout" in reason
         skipped = [r for runs in runs_by_query for r in runs if not r["ok"]]
         assert len(skipped) == 3 and all("not run" in r["error"] for r in skipped)
+
+
+
+# ---------- client-side timeouts ----------
+
+class TimeoutThen:
+    """Raises a ReadTimeout for the requests listed in `timeouts` (by index), else replays responses."""
+
+    def __init__(self, responses, timeouts=(0,)):
+        self.responses, self.timeouts, self.requests = list(responses), set(timeouts), []
+
+    def __call__(self, request):
+        index = len(self.requests)
+        self.requests.append(request)
+        if request.url.path != "/account.json" and index in self.timeouts:
+            raise httpx.ReadTimeout("timed out", request=request)
+        status, body = self.responses.pop(0)
+        return httpx.Response(status, json=body)
+
+
+class TestTimeouts:
+    def test_first_search_timeout_is_a_timeout_outcome_billed_assumed(self, no_sleep):
+        fake = TimeoutThen([], timeouts=(0,))
+        obs = run(fetcher(fake).observe("q"))
+        assert obs.outcome == OUTCOME_TIMEOUT
+        assert obs.credits_used == 1 and obs.fetch_meta["assumed_billed_credits"] == 1
+        assert obs.fetch_meta["calls"][0]["billed"] == "assumed"
+        assert len(fake.requests) == 1 and no_sleep == []  # not retried
+
+    def test_timeout_is_not_refunded_from_the_budget(self):
+        fake = TimeoutThen([account(3), (200, ok({})), (200, ok({}))], timeouts=(1,))
+        f = fetcher(fake)
+        run(f.preflight(1))  # budget 3
+        assert run(f.observe("a")).outcome == OUTCOME_TIMEOUT
+        assert f._budget.used == 1  # the assumed credit stays counted
+        run(f.observe("b")); run(f.observe("c"))
+        with pytest.raises(SerpApiCreditsError):
+            run(f.observe("d"))
+
+    def test_followup_timeout_fails_the_run_but_is_billed(self, no_sleep):
+        fake = TimeoutThen([TOKEN], timeouts=(1,))
+        with pytest.raises(SerpApiError, match="timed out") as info:
+            run(fetcher(fake).observe("q"))
+        assert info.value.credits_used == 2  # search billed + follow-up assumed
+        assert no_sleep == []
+
+    def test_timeout_setting(self, monkeypatch):
+        assert Stage1Config.from_env().serpapi_timeout_seconds == 120.0
+        monkeypatch.setenv("STAGE1_SERPAPI_TIMEOUT_SECONDS", "90")
+        assert Stage1Config.from_env().serpapi_timeout_seconds == 90.0
+        assert SerpApiAIOFetcher(api_key=KEY)._timeout == 120.0
+
+    def test_aggregation_counts_timeouts_outside_successful_runs(self):
+        timeout_run = {"run_index": 0, "ok": True, "observation": Observation(
+            answer_text="", model="m", outcome=OUTCOME_TIMEOUT, credits_used=1, fetch_meta={"assumed_billed_credits": 1})}
+        runs = [obs_run(OUTCOME_ANSWER, cited=True, credits=2), timeout_run, obs_run(OUTCOME_NO_AI_ANSWER, credits=1)]
+        m = aggregate_query_runs(runs, "acme.in", ["Acme"], reports_activation=True)["metrics"]
+        assert m["timeout_runs"] == 1 and m["successful_runs"] == 2
+        assert m["credits_used"] == 4 and m["credits_assumed"] == 1
+        assert m["aio_activation_rate"] == 50.0  # 1 shown of 2 successful; the timeout is unknown, not counted
+
+    def test_stop_rule_counts_timeouts(self, monkeypatch):
+        from app.observation import stage1_job
+
+        outcomes = [OUTCOME_TIMEOUT, OUTCOME_FOLLOWUP_EMPTY, OUTCOME_TIMEOUT, OUTCOME_ANSWER]
+        calls = []
+
+        class Scripted:
+            async def observe(self, query):
+                outcome = outcomes[len(calls)]
+                calls.append(outcome)
+                return Observation(answer_text="", model="m", outcome=outcome, credits_used=1)
+
+        async def quiet(*a, **k):
+            return None
+
+        monkeypatch.setattr(stage1_job, "_send_progress", quiet)
+        config = Stage1Config.from_env({"runs_per_query": 4, "observation_concurrency": 1, "max_unretrieved_fraction": 0.5})
+        _, reason = run(stage1_job._observe_all([{"q": "a", "type": "x"}], Scripted(), config, "obs"))
+        assert len(calls) == 3 and "3 of 4 planned runs ended as followup_empty or timeout" in reason

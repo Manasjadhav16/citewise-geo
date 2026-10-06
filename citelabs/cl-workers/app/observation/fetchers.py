@@ -69,6 +69,8 @@ OUTCOME_PARSE_ERROR = "parse_error"
 OUTCOME_ANSWER_NO_REFERENCES = "answer_no_references"
 # An AI answer existed (page token) but fetching its content returned nothing, even after a retry
 OUTCOME_FOLLOWUP_EMPTY = "followup_empty"
+# The first request timed out on the client side; the provider probably completed (and billed) it
+OUTCOME_TIMEOUT = "timeout"
 
 
 class ObservationFetcher(ABC):
@@ -205,7 +207,11 @@ class GeminiGroundingFetcher(ObservationFetcher):
 
 
 def get_observation_fetcher(
-    name: str, model: str, serpapi_settings: Optional[Dict[str, str]] = None, serpapi_min_balance: int = 0
+    name: str,
+    model: str,
+    serpapi_settings: Optional[Dict[str, str]] = None,
+    serpapi_min_balance: int = 0,
+    serpapi_timeout_seconds: float = 120.0,
 ) -> ObservationFetcher:
     """Fetcher registry, selected by STAGE1_FETCHER."""
     if name == GeminiGroundingFetcher.name:
@@ -213,5 +219,5 @@ def get_observation_fetcher(
     from .serpapi_aio import SerpApiAIOFetcher
 
     if name == SerpApiAIOFetcher.name:
-        return SerpApiAIOFetcher(**(serpapi_settings or {}), min_balance=serpapi_min_balance)
+        return SerpApiAIOFetcher(**(serpapi_settings or {}), min_balance=serpapi_min_balance, timeout=serpapi_timeout_seconds)
     raise ValueError(f"Unknown Stage 1 observation fetcher: {name}")

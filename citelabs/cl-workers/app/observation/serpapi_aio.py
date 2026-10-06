@@ -56,6 +56,7 @@ from .fetchers import (
     OUTCOME_FOLLOWUP_EMPTY,
     OUTCOME_NO_AI_ANSWER,
     OUTCOME_PARSE_ERROR,
+    OUTCOME_TIMEOUT,
     Observation,
     ObservationFetcher,
     ObservedCitation,
@@ -88,6 +89,10 @@ class SerpApiFormatError(SerpApiError):
 
 class SerpApiCreditsError(SerpApiError):
     """Not enough SerpApi credits for the planned run."""
+
+
+class SerpApiTimeout(SerpApiError):
+    """The request timed out on the client side; counted as billed (assumed)."""
 
 
 class SerpApiEmptyResult(SerpApiError):
@@ -382,7 +387,7 @@ class SerpApiAIOFetcher(ObservationFetcher):
         device: str = "desktop",
         api_key: Optional[str] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
-        timeout: float = 60.0,
+        timeout: float = 120.0,
         raw_dump_dir: Optional[str] = None,
         min_balance: int = 0,
     ):
@@ -463,6 +468,13 @@ class SerpApiAIOFetcher(ObservationFetcher):
         await self._budget.take()
         try:
             response = await client.get(SEARCH_URL, params={**params, "no_cache": "true", "api_key": self.api_key})
+        except httpx.TimeoutException as exc:
+            # SerpApi has probably completed (and billed) the search: count it, marked as assumed
+            meta["billed_credits"] += 1
+            meta["assumed_billed_credits"] += 1
+            meta["calls"].append({"engine": params["engine"], "billed": "assumed", "http": None, "status": None,
+                                  "error": f"client timeout after {self._timeout:.0f}s: {type(exc).__name__}"})
+            raise SerpApiTimeout(f"{params['engine']} request timed out after {self._timeout:.0f}s ({type(exc).__name__}); counted as billed (assumed)")
         except httpx.HTTPError as exc:
             await self._budget.refund()
             raise SerpApiError(f"request to SerpApi failed: {type(exc).__name__}: {exc}")
@@ -508,7 +520,8 @@ class SerpApiAIOFetcher(ObservationFetcher):
             "engines_called": [],  # billed requests, in order
             "search_ids": [],
             "calls": [],  # every request: engine, billed, status, error
-            "billed_credits": 0,
+            "billed_credits": 0,  # includes assumed ones
+            "assumed_billed_credits": 0,  # client-side timeouts counted as billed
             "page_token_used": False,
             "followup_retried": False,
         }
@@ -541,17 +554,29 @@ class SerpApiAIOFetcher(ObservationFetcher):
 
     async def _observe(self, query: str, meta: Dict[str, Any], raws: List[Dict[str, Any]]) -> Observation:
         started = time.monotonic()
+        model = f"google_ai_overview via serpapi ({self.gl}/{self.hl}/{self.device})"
         async with self._client() as client:
-            data = await self._search(
-                client, {"engine": "google", "q": query, "gl": self.gl, "hl": self.hl, "device": self.device}, meta, raws
-            )
+            try:
+                data = await self._search(
+                    client, {"engine": "google", "q": query, "gl": self.gl, "hl": self.hl, "device": self.device}, meta, raws
+                )
+            except SerpApiTimeout as exc:
+                # Outcome `timeout`: AI Overview status unknown; not retried automatically
+                return Observation(
+                    answer_text="",
+                    model=model,
+                    outcome=OUTCOME_TIMEOUT,
+                    credits_used=meta["billed_credits"],
+                    fetch_meta={**meta, "timeout": str(exc)},
+                    raw_responses=raws,
+                    latency_seconds=time.monotonic() - started,
+                )
             ai_overview = data.get("ai_overview")
             if _is_page_token_only(ai_overview):
                 # Only a token: fetch the overview now, before the token expires
                 meta["page_token_used"] = True
                 await self._follow_page_token(client, ai_overview["page_token"], meta, raws)
 
-        model = f"google_ai_overview via serpapi ({self.gl}/{self.hl}/{self.device})"
         credits = meta["billed_credits"]
         try:
             parsed = parse_raw_responses(raws)

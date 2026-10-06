@@ -50,8 +50,10 @@ class Stage1Config:
     skip_evidence: bool = False
     # serpapi_aio: the pre-check refuses a run whose worst case could take the balance below this
     serpapi_min_balance: int = 0
-    # Stop observing once more than this fraction of planned runs end as followup_empty (None: never)
-    max_followup_empty_fraction: Optional[float] = None
+    # serpapi_aio request timeout; a client-side timeout is counted as billed (assumed)
+    serpapi_timeout_seconds: float = 120.0
+    # Stop observing once more than this fraction of planned runs end as followup_empty or timeout (None: never)
+    max_unretrieved_fraction: Optional[float] = None
     source_categories: Tuple[str, ...] = load_source_categories("")
 
     @property
@@ -83,7 +85,8 @@ class Stage1Config:
             serpapi_device=os.getenv("STAGE1_SERPAPI_DEVICE", cls.serpapi_device),
             skip_evidence=_env_bool("STAGE1_SKIP_EVIDENCE", cls.skip_evidence),
             serpapi_min_balance=_env_int("STAGE1_SERPAPI_MIN_BALANCE", cls.serpapi_min_balance),
-            max_followup_empty_fraction=_env_float("STAGE1_MAX_FOLLOWUP_EMPTY_FRACTION", cls.max_followup_empty_fraction),
+            serpapi_timeout_seconds=_env_float("STAGE1_SERPAPI_TIMEOUT_SECONDS", cls.serpapi_timeout_seconds),
+            max_unretrieved_fraction=_env_float("STAGE1_MAX_UNRETRIEVED_FRACTION", cls.max_unretrieved_fraction),
             source_categories=load_source_categories(),
         )
         # Per-run overrides from the API request (e.g. a smaller N for a quick run)
@@ -111,8 +114,10 @@ class Stage1Config:
             raise ValueError(f"Stage 1 config: unknown fetcher {self.fetcher!r}")
         if self.serpapi_min_balance < 0:
             raise ValueError("Stage 1 config: serpapi_min_balance must be >= 0")
-        if self.max_followup_empty_fraction is not None and not 0 < self.max_followup_empty_fraction <= 1:
-            raise ValueError("Stage 1 config: max_followup_empty_fraction must be in (0, 1]")
+        if self.max_unretrieved_fraction is not None and not 0 < self.max_unretrieved_fraction <= 1:
+            raise ValueError("Stage 1 config: max_unretrieved_fraction must be in (0, 1]")
+        if self.serpapi_timeout_seconds <= 0:
+            raise ValueError("Stage 1 config: serpapi_timeout_seconds must be > 0")
         if self.serpapi_device not in ("desktop", "mobile", "tablet"):
             raise ValueError("Stage 1 config: serpapi_device must be desktop, mobile or tablet")
         if self.min_source_tokens > self.per_source_token_cap:
