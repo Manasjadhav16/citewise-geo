@@ -110,7 +110,7 @@ def test_unseeded_run_keeps_existing_behaviour(fake_pipeline):
     # Same pages as discovery returned, now labelled
     assert [c["url"] for c in fake_pipeline["crawled"]] == [d["url"] for d in DISCOVERED]
     assert [c["source_category"] for c in fake_pipeline["crawled"]] == ["direct_competitor", "other", "reference"]
-    assert final["seed_mode"] is None
+    assert final["seed_mode"] is None and final["seed_version"] is None
     assert len(fake_pipeline["rag_questions"]) == 15
     # Existing scores untouched, new metrics added alongside
     assert final["scores"]["geo_score"] == 70.0 and final["scores"]["citation_rate"] == 100.0
@@ -131,12 +131,14 @@ def test_stage1_seed_uses_queries_and_merges_pool(fake_pipeline):
     assert fake_pipeline["discovery"] == 1  # discovery still runs and is merged in
     crawled = [(c["url"], c["source_category"], c["origin"]) for c in fake_pipeline["crawled"]]
     assert crawled == [
+        ("https://acme.in/blog", "target_company", "stage1_target"),
         ("https://news.com/best-gateways", "media", "stage1"),
         ("https://payu.in/fees", "direct_competitor", "stage1"),
         ("https://rival.com/pricing", "direct_competitor", "discovery"),
         ("https://en.wikipedia.org/wiki/UPI", "reference", "discovery"),
-    ]  # news.com discovered page dropped as same domain; acme.in blog excluded as target
-    assert final["seed_mode"] == "stage1"
+    ]  # news.com discovered page dropped as same domain; acme.in blog kept as a target page
+    assert final["seed_mode"] == "stage1" and final["seed_version"] == "v2_target_pages"
+    assert final["pool_counts"]["target"]["target_pages"] == 1
     assert final["pool_counts"]["discovered_duplicate_domains"] == 1
     assert final["pool_counts"]["stage1_skipped"]["target_domain"] == 1
     assert final["source_pool"] == fake_pipeline["crawled"]
@@ -148,9 +150,11 @@ def test_baseline_seed_reuses_pool_without_discovery(fake_pipeline):
         {"url": "https://news.com/best-gateways", "type": "authority_source", "source_category": "media", "competitor_group": "ai_visibility", "origin": "stage1"},
         {"url": "https://payu.in/fees", "type": "business_competitor", "source_category": "direct_competitor", "competitor_group": "direct_business", "origin": "stage1"},
     ]
-    seed = {"mode": "baseline", "questions": [{"q": "stage1 query A", "type": "intent"}, {"q": "old serp", "type": "SERP"}], "source_pool": pool}
+    seed = {"mode": "baseline", "questions": [{"q": "stage1 query A", "type": "intent"}, {"q": "old serp", "type": "SERP"}], "source_pool": pool,
+            "seed_version": "v2_target_pages"}
     run(seed)
     final = fake_pipeline["final"]
+    assert final["seed_version"] == "v2_target_pages"  # inherited from the baseline
     assert fake_pipeline["generate_questions"] == 0 and fake_pipeline["discovery"] == 0
     assert fake_pipeline["crawled"] == pool  # exactly the baseline's pool
     assert fake_pipeline["rag_questions"] == ["stage1 query A"]  # SERP rows from the baseline are not re-asked

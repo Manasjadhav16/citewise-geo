@@ -109,6 +109,12 @@ async def run_full_job(
     seed = seed or {}
     seed_mode = seed.get("mode")
     pool_counts: Dict[str, Any] = {}
+    # How a seeded pool was built: this version for Stage 1 seeds; "after" runs inherit the baseline's
+    seed_version = (
+        stage2_seed.SEED_VERSION if seed_mode == "stage1"
+        else seed.get("seed_version") if seed_mode == "baseline"
+        else None
+    )
     # DO NOT hardcode model_name - let each step use get_model_for_role() / get_model_for_step()
     # model_name parameter is kept for backward compatibility but should be None
     if model_name:
@@ -348,10 +354,12 @@ async def run_full_job(
 
                 if seed_mode == "stage1":
                     stage1_pool, skipped = stage2_seed.build_stage1_pool(seed.get("stage1_sources") or [], url)
+                    target_pages, target_counts = stage2_seed.build_target_pages(seed.get("stage1_sources") or [], url)
                     competitor_urls_list, pool_counts = stage2_seed.merge_source_pools(
-                        stage1_pool, discovered, url, stage2_seed.max_sources_from_env()
+                        stage1_pool, discovered, url, stage2_seed.max_sources_from_env(), target_pages=target_pages
                     )
-                    pool_counts["stage1_skipped"] = skipped
+                    pool_counts["stage1_skipped"] = skipped  # target_domain: kept out of the competitor pool
+                    pool_counts["target"] = target_counts
                 else:
                     # Unseeded: same pages as before, just labelled
                     competitor_urls_list = stage2_seed.annotate_discovered(discovered)
@@ -686,6 +694,7 @@ async def run_full_job(
                 # Two-stage GEO: the exact pool crawled (reused by "after" runs) and how it was built
                 "source_pool": competitor_urls_list,
                 "seed_mode": seed_mode,
+                "seed_version": seed_version,
                 "pool_counts": pool_counts,
                 "rag_results": [
                     {

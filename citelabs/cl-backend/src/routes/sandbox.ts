@@ -44,6 +44,7 @@ type ResultBody = {
   // Two-stage GEO
   source_pool?: Array<any>;
   seed_mode?: string | null;
+  seed_version?: string | null;
   pool_counts?: Record<string, unknown>;
 };
 
@@ -218,6 +219,7 @@ export default async function sandboxRoutes(app: FastifyInstance) {
         run_tag: run.runTag ?? null,
         baseline_run_id: run.baselineRunId ?? null,
         seed_mode: run.seedMode ?? null,
+        seed_version: run.seedVersion ?? null,
         question_set: run.questionSet ?? null,
         source_pool: run.sourcePool ?? null,
         pool_counts: run.poolCounts ?? null,
@@ -522,6 +524,7 @@ export default async function sandboxRoutes(app: FastifyInstance) {
           questionSet: jsonOrNull((body.questions || []).filter((q) => q.type !== 'SERP')),
           sourcePool: jsonOrNull(body.source_pool),
           poolCounts: jsonOrNull(body.pool_counts),
+          seedVersion: body.seed_version ?? null,
         },
       });
 

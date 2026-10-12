@@ -23,7 +23,7 @@ export type RunSeedRequest = {
 
 export type WorkerSeed =
   | { mode: 'stage1'; questions: { q: string; type: string }[]; stage1_sources: Record<string, unknown>[] }
-  | { mode: 'baseline'; questions: { q: string; type: string }[]; source_pool: unknown[] };
+  | { mode: 'baseline'; questions: { q: string; type: string }[]; source_pool: unknown[]; seed_version: string | null };
 
 export type ResolvedRunSeed = {
   seed: WorkerSeed | null;
@@ -85,7 +85,8 @@ export async function resolveRunSeed(prisma: PrismaClient, req: RunSeedRequest):
       throw new RunSeedError(409, 'Baseline run has no stored question set or source pool (it predates two-stage support)');
     }
     return {
-      seed: { mode: 'baseline', questions, source_pool: pool },
+      // the "after" run inherits how the baseline's pool was built
+      seed: { mode: 'baseline', questions, source_pool: pool, seed_version: baseline.seedVersion ?? null },
       observationId: baseline.observationId,
       runTag: 'after',
       baselineRunId: baseline.id,

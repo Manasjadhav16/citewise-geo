@@ -5,6 +5,8 @@ observations to the controlled RAG pipeline.
 - build_stage1_pool / merge_source_pools: turn Stage 1's union source pools into
   the competitor list Stage 2 crawls, deduplicated by domain, with Stage 1's
   category labels preserved, then merged with Stage 2's own SERP/LLM discovery.
+- build_target_pages: the target's own pages that Stage 1 observed, crawled
+  alongside the sandbox page (seed version v2_target_pages).
 - annotate_discovered: category labels for runs without Stage 1 seeding (no
   pages are dropped, so unseeded runs crawl exactly what they did before).
 - tag_rag_result: per-answer sandbox citation position and the category of every
@@ -40,6 +42,11 @@ TYPE_BUSINESS_COMPETITOR = "business_competitor"
 TYPE_AUTHORITY_SOURCE = "authority_source"
 
 DEFAULT_MAX_SOURCES = 40
+# Target-domain pages from Stage 1 kept in a seeded pool (outside the max_sources cap)
+MAX_TARGET_PAGES = 10
+# Seeded runs built with target pages; runs without a seed_version predate it
+SEED_VERSION = "v2_target_pages"
+ORIGIN_STAGE1_TARGET = "stage1_target"
 
 # Same pattern as sandbox._extract_urls_from_text, kept here to stay import-light
 _URL_PATTERN = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+|www\.[^\s<>"{}|\\^`\[\]]+', re.IGNORECASE)
@@ -127,22 +134,94 @@ def build_stage1_pool(stage1_sources: Sequence[Mapping[str, Any]], target_domain
     return pool, skipped
 
 
+def _page_key(url: str) -> str:
+    """URL identity ignoring scheme, "www.", trailing slash and fragment (same rule as the backend's sameUrl)."""
+    match = re.match(r"^(?:[a-z][a-z0-9+.-]*://)?([^/?#]*)([^?#]*)(\?[^#]*)?", (url or "").strip(), re.IGNORECASE)
+    host, path, query = match.group(1).lower(), match.group(2), match.group(3) or ""
+    if host.startswith("www."):
+        host = host[4:]
+    return f"{host}{path.rstrip('/')}{query}"
+
+
+def build_target_pages(
+    stage1_sources: Sequence[Mapping[str, Any]],
+    sandbox_url: str,
+    max_pages: int = MAX_TARGET_PAGES,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    The target's own pages that Stage 1 observed, for the seeded Stage 2 corpus.
+
+    Only pages on exactly the sandbox's domain are kept: the pipeline weights
+    (sandbox_brand) and counts citations (sandbox_citations) by exact domain, so a
+    subdomain page would be treated as a third-party source. One entry per URL; the
+    sandbox URL itself is skipped because it is always crawled. Ranked by Stage 1
+    stability (earlier rows win ties) and capped at max_pages.
+
+    Returns (pages, counts).
+    """
+    target = normalize_domain(sandbox_url)
+    sandbox_key = _page_key(sandbox_url)
+    best: Dict[str, Dict[str, Any]] = {}
+    counts = {"target_pages": 0, "target_sandbox_url": 0, "target_duplicate_url": 0,
+              "target_other_host": 0, "target_over_cap": 0}
+    for row in stage1_sources:
+        url = row.get("url")
+        domain = normalize_domain(row.get("domain") or url or "")
+        if not url or not domain:
+            continue
+        is_target = row.get("category") == TARGET_CATEGORY or domain == target or domain.endswith("." + target)
+        if not is_target:
+            continue
+        if normalize_domain(url) != target:
+            counts["target_other_host"] += 1
+            continue
+        key = _page_key(url)
+        if key == sandbox_key:
+            counts["target_sandbox_url"] += 1
+            continue
+        stability = float(row.get("stability") or 0.0)
+        if key in best:
+            counts["target_duplicate_url"] += 1
+            if stability <= best[key]["stage1_stability"]:
+                continue
+        best[key] = {
+            "url": url,
+            "type": TYPE_AUTHORITY_SOURCE,  # not a business competitor; the sandbox domain match decides weighting
+            "source": "stage1",
+            "source_type": "target_page",
+            "origin": ORIGIN_STAGE1_TARGET,
+            "source_category": TARGET_CATEGORY,
+            "competitor_group": competitor_group(TARGET_CATEGORY),
+            "category_source": "target_domain_match",
+            "stage1_stability": stability,
+        }
+    ranked = sorted(best.values(), key=lambda e: -e["stage1_stability"])  # stable sort keeps first-seen order on ties
+    counts["target_over_cap"] = max(0, len(ranked) - max_pages)
+    pages = ranked[:max_pages]
+    counts["target_pages"] = len(pages)
+    return pages, counts
+
+
 def merge_source_pools(
     stage1_pool: Sequence[Mapping[str, Any]],
     discovered: Sequence[Mapping[str, Any]],
     target_domain: str,
     max_sources: int,
+    target_pages: Sequence[Mapping[str, Any]] = (),
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """
-    Stage 1 pool first (its categories win), then discovered sources whose domain
-    is not already present, deduplicated by domain. Capped at max_sources, which
-    trims discovered sources before Stage 1 ones.
+    Target pages first (outside the cap), then the Stage 1 pool (its categories
+    win), then discovered sources whose domain is not already present,
+    deduplicated by domain. Discovered target-domain pages are still dropped.
+    max_sources caps the non-target sources, trimming discovered ones before
+    Stage 1 ones.
 
     Returns (merged pool, counts).
     """
     if max_sources < 1:
         raise ValueError("max_sources must be >= 1")
     target = normalize_domain(target_domain)
+    targets: List[Dict[str, Any]] = [dict(e) for e in target_pages]
     merged: List[Dict[str, Any]] = [dict(e) for e in stage1_pool]
     seen = {normalize_domain(e["url"]) for e in merged}
     added = duplicates = 0
@@ -162,7 +241,9 @@ def merge_source_pools(
         "discovered_duplicate_domains": duplicates,
         "dropped_over_cap": max(0, len(merged) - max_sources),
     }
-    return merged[:max_sources], counts
+    if targets:
+        counts["target_pages"] = len(targets)
+    return targets + merged[:max_sources], counts
 
 
 def category_lookup(pool: Iterable[Mapping[str, Any]]) -> Dict[str, Tuple[str, str]]:

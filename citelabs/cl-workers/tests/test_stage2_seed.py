@@ -3,6 +3,7 @@ import pytest
 from app.stage2_seed import (
     annotate_discovered,
     build_stage1_pool,
+    build_target_pages,
     category_lookup,
     extract_cited_urls,
     is_error_result,
@@ -74,6 +75,35 @@ class TestBuildStage1Pool:
         assert pipeline_type("indirect_competitor") == "authority_source"
 
 
+class TestBuildTargetPages:
+    def test_keeps_target_pages_ranked_by_stability_without_the_sandbox_url(self):
+        pages, counts = build_target_pages(
+            [
+                src("https://acme.in/blog/a", "target_company", 0.33),
+                src("http://acme.in/payment-gateway", "target_company", 1.0),  # the sandbox URL, other spelling
+                src("https://www.acme.in/pricing", "other", 1.0),  # mislabelled, but on the target domain
+                src("https://acme.in/blog/a/", "target_company", 0.67),  # same page, more stable
+                src("https://docs.acme.in/api", "target_company", 1.0),  # subdomain: not matched as sandbox
+                src("https://rival.com/x", "direct_competitor", 1.0),
+            ],
+            SANDBOX,
+        )
+        assert [p["url"] for p in pages] == ["https://www.acme.in/pricing", "https://acme.in/blog/a/"]
+        assert {(p["origin"], p["source_category"], p["competitor_group"], p["type"], p["source_type"]) for p in pages} == {
+            ("stage1_target", "target_company", "target", "authority_source", "target_page")
+        }
+        assert counts == {"target_pages": 2, "target_sandbox_url": 1, "target_duplicate_url": 1,
+                          "target_other_host": 1, "target_over_cap": 0}
+
+    def test_cap_keeps_most_stable(self):
+        rows = [src(f"https://acme.in/p{i}", "target_company", i / 20) for i in range(12)]
+        pages, counts = build_target_pages(rows, SANDBOX)
+        assert len(pages) == 10 and pages[0]["url"] == "https://acme.in/p11" and pages[-1]["url"] == "https://acme.in/p2"
+        assert counts["target_over_cap"] == 2
+        pages, _ = build_target_pages(rows, SANDBOX, max_pages=3)
+        assert [p["url"] for p in pages] == ["https://acme.in/p11", "https://acme.in/p10", "https://acme.in/p9"]
+
+
 class TestMergeSourcePools:
     STAGE1 = [
         {"url": "https://rival.com/b", "type": "business_competitor", "source_category": "direct_competitor", "competitor_group": "direct_business", "origin": "stage1"},
@@ -101,6 +131,14 @@ class TestMergeSourcePools:
         merged, counts = merge_source_pools(self.STAGE1, discovered, SANDBOX, max_sources=3)
         assert [m["url"] for m in merged] == ["https://rival.com/b", "https://news.com/x", "https://d0.com"]
         assert counts["dropped_over_cap"] == 4
+
+    def test_target_pages_first_and_outside_the_cap(self):
+        targets = [{"url": "https://acme.in/blog", "origin": "stage1_target", "source_category": "target_company"}]
+        discovered = [{"url": "https://acme.in/pricing", "type": "authority_source"},  # discovered target: still dropped
+                      {"url": "https://d0.com", "type": "authority_source"}]
+        merged, counts = merge_source_pools(self.STAGE1, discovered, SANDBOX, max_sources=2, target_pages=targets)
+        assert [m["url"] for m in merged] == ["https://acme.in/blog", "https://rival.com/b", "https://news.com/x"]
+        assert counts["target_pages"] == 1 and counts["dropped_over_cap"] == 1
 
     def test_invalid_cap(self):
         with pytest.raises(ValueError):

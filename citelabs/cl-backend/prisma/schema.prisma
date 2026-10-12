@@ -57,6 +57,7 @@ model SandboxRun {
   runTag        String?  @map("run_tag")          // before | after
   baselineRunId String?  @map("baseline_run_id")  // for "after" runs
   seedMode      String?  @map("seed_mode")        // stage1 | baseline | null (unseeded)
+  seedVersion   String?  @map("seed_version")     // how a seeded pool was built, e.g. v2_target_pages; null = earlier seeding
   questionSet   Json?    @map("question_set")     // exact questions asked (reused by "after" runs)
   sourcePool    Json?    @map("source_pool")      // exact source pool crawled (reused by "after" runs)
   poolCounts    Json?    @map("pool_counts")

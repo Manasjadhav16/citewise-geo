@@ -96,8 +96,8 @@ export default async function compareRoutes(app: FastifyInstance) {
       }
 
       return reply.status(200).send({
-        before: { id: b.id, run_tag: b.runTag, seed_mode: b.seedMode, observation_id: b.observationId, created_at: b.createdAt },
-        after: { id: a.id, run_tag: a.runTag, seed_mode: a.seedMode, baseline_run_id: a.baselineRunId, created_at: a.createdAt },
+        before: { id: b.id, run_tag: b.runTag, seed_mode: b.seedMode, seed_version: b.seedVersion, observation_id: b.observationId, created_at: b.createdAt },
+        after: { id: a.id, run_tag: a.runTag, seed_mode: a.seedMode, seed_version: a.seedVersion, baseline_run_id: a.baselineRunId, created_at: a.createdAt },
         warnings,
         controlled,
         per_query: perQueryComparison(b.ragResults, a.ragResults, stage1Queries),
