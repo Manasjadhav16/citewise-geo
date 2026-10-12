@@ -325,7 +325,8 @@ export default async function sandboxRoutes(app: FastifyInstance) {
   // ==========================================
   // POST /api/sandbox/:run_id/result - Receive final result from worker
   // ==========================================
-  app.post('/api/sandbox/:run_id/result', async (request, reply) => {
+  // The final result carries every crawled page's full text; a seeded pool exceeds Fastify's 1 MB default
+  app.post('/api/sandbox/:run_id/result', { bodyLimit: 50 * 1024 * 1024 }, async (request, reply) => {
     const { run_id } = request.params as { run_id: string };
     const body = request.body as ResultBody;
 
