@@ -271,6 +271,27 @@ async def stage1_start_endpoint(payload: Stage1StartRequest):
     return {"message": "Stage 1 observation started", "observation_id": payload.observation_id}
 
 
+class GapAnalysisStartRequest(BaseModel):
+    report_id: str
+    payload: Dict[str, Any]  # built by the backend: see gap_analysis.run_gap_analysis
+
+
+@app.post("/gap-analysis/start")
+async def gap_analysis_start_endpoint(request: GapAnalysisStartRequest):
+    """Start a competitive gap analysis for a Stage 1 observation; the report is posted back to the backend."""
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from .gap_analysis import run_gap_analysis_job
+
+    payload = request.payload
+    if not payload.get("sandbox_url") or not payload.get("queries"):
+        raise HTTPException(status_code=400, detail="payload needs sandbox_url and queries")
+    asyncio.create_task(run_gap_analysis_job(request.report_id, payload))
+    return {"message": "Gap analysis started", "report_id": request.report_id}
+
+
 class CompareRequest(BaseModel):
     before: Dict[str, Optional[float]]
     after: Dict[str, Optional[float]]
