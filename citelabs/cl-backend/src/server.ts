@@ -10,6 +10,7 @@ import stagingRoutes from './routes/staging';
 import chatRoutes from './routes/chat';
 import observationRoutes from './routes/observation';
 import compareRoutes from './routes/compare';
+import gapAnalysisRoutes from './routes/gapAnalysis';
 
 export const createServer = (): FastifyInstance => {
   const app = Fastify({
@@ -28,6 +29,7 @@ export const createServer = (): FastifyInstance => {
   app.register(chatRoutes);
   app.register(observationRoutes);
   app.register(compareRoutes);
+  app.register(gapAnalysisRoutes);
 
   return app;
 };

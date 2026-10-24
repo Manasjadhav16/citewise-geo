@@ -496,3 +496,19 @@ model ObservationEvent {
   @@index([observationId])
   @@map("observation_events")
 }
+
+// Competitive gap optimization (v1): per-query claims from the sources Google's
+// AI Overview cited for a Stage 1 observation, judged against the target's pages
+model GapReport {
+  id            String   @id
+  observationId String   @map("observation_id")
+  status        String // running | completed | failed
+  report        Json? // the worker's report (see cl-workers app/gap_analysis.py)
+  error         String?
+  modelCalls    Int?     @map("model_calls") // text-generation attempts, retries included
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([observationId])
+  @@map("gap_reports")
+}

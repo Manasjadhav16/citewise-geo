@@ -284,6 +284,23 @@ export class Worker {
     }
   }
 
+  async startGapAnalysis(payload: { report_id: string; payload: Record<string, unknown> }): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/gap-analysis/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(
+        `Worker /gap-analysis/start request failed with status ${response.status}: ${errorBody || 'no body'}`,
+      );
+    }
+  }
+
   async processChatMessage(payload: {
     session_id: string;
     content: string;
