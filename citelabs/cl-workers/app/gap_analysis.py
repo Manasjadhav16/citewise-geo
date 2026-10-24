@@ -31,7 +31,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .geo_metrics import compute_per_source_token_budget, normalize_domain
 from .observation.evidence import CHARS_PER_TOKEN, estimate_tokens
@@ -303,27 +303,164 @@ def select_excerpt(page_text: str, query: str, claims: Sequence[Claim], token_bu
     return "\n".join(p for _, p in sorted(chosen))
 
 
+# ---------- target pages ----------
+
+@dataclass
+class PageText:
+    """A target page's text; main/chrome are set when the page was crawled with its sections."""
+
+    text: str
+    main: Optional[str] = None  # without header, nav, footer and aside
+    chrome: Optional[str] = None  # header, nav, footer and aside only
+
+
+def as_page(value: Union[str, PageText]) -> PageText:
+    return value if isinstance(value, PageText) else PageText(value)
+
+
+# ---------- suggestion honesty ----------
+
+FIGURE_PLACEHOLDER = "[add your real figure]"
+# Longest first, so "industry-leading" is removed before "leading"
+PROMOTIONAL_TERMS = (
+    "industry-leading", "industry leading", "market-leading", "market leading", "best-in-class", "best in class",
+    "world-class", "world class", "state-of-the-art", "cutting-edge", "number one", "no. 1", "#1", "most trusted",
+    "most reliable", "unmatched", "unbeatable", "unparalleled", "unrivalled", "unrivaled", "revolutionary",
+    "seamlessly", "seamless", "fastest", "leading", "best", "top",
+)
+
+
+# Ordinary phrases that contain a listed word without promoting anything
+_NOT_PROMOTIONAL_AFTER = {"best": r"(?!\s+practices?\b)", "leading": r"(?!\s+(?:to|up)\b)", "top": r"(?!\s+of\b)"}
+_NOT_PROMOTIONAL_BEFORE = {"top": r"(?<!\bon\s)"}
+
+
+def _term_pattern(term: str) -> "re.Pattern":
+    return re.compile(
+        _NOT_PROMOTIONAL_BEFORE.get(term, "") + r"(?<![\w#-])" + re.escape(term) + r"(?![\w-])"
+        + _NOT_PROMOTIONAL_AFTER.get(term, ""),
+        re.IGNORECASE,
+    )
+
+
+_TERM_PATTERNS = [(t, _term_pattern(t)) for t in PROMOTIONAL_TERMS]
+
+
+_REMOVED = "\x00"  # marks where promotional wording was taken out
+
+
+def _needs_an(word: str) -> bool:
+    """By sound: "an" before a vowel, and before acronyms read letter by letter from A, E, F, H, I, L, M, N, O, R, S, X."""
+    if len(word) > 1 and word.isupper():
+        return word[0] in "AEFHILMNORSX"
+    return word[:1].lower() in "aeiou"
+
+
+def _fix_articles(text: str) -> str:
+    """Re-choose "a"/"an" only where the following word changed because wording was removed."""
+    def choose(match: "re.Match") -> str:
+        article, word = match.group(1), match.group(2)
+        wanted = "an" if _needs_an(word) else "a"
+        return (wanted.capitalize() if article[:1].isupper() else wanted) + " " + word
+    text = re.sub(r"\b([Aa]n?)\s*" + _REMOVED + r"[\s" + _REMOVED + r"]*(\w+)", choose, text)
+    return text.replace(_REMOVED, "")
+
+
+def check_suggestion(
+    suggestion: str, target_text: str, competitor_names: Sequence[str] = ()
+) -> Tuple[str, List[str]]:
+    """
+    Post-check for a suggested content addition. Promotional wording (superlatives
+    such as "industry-leading", "best", "fastest") is removed unless a target page
+    uses it; figures that are not on a target page become "[add your real figure]";
+    naming a cited competitor is flagged. Returns (checked suggestion, flags).
+    """
+    flags: List[str] = []
+    text = suggestion
+    target_norm = " " + normalize_for_match(target_text) + " "
+    removed = []
+    for term, pattern in _TERM_PATTERNS:
+        if " " + normalize_for_match(term) + " " in target_norm or not pattern.search(text):
+            continue
+        text = pattern.sub(_REMOVED, text)
+        removed.append(term)
+    if removed:
+        flags.append("promotional_wording_removed:" + ",".join(removed))
+    target_numbers = set(numbers_in(target_text))
+    unknown = [n for n in numbers_in(text) if n not in target_numbers]
+    if unknown:
+        flags.append("suggestion_figures_not_on_target_page:" + ",".join(dict.fromkeys(unknown)))
+        text = re.sub(r"(?:Rs\.?\s*|INR\s*|\u20b9\s*)?\d+(?:[.,]\d+)*\s*%?",
+                      lambda m: m.group(0) if (numbers_in(m.group(0)) or [""])[0] in target_numbers else FIGURE_PLACEHOLDER,
+                      text)
+    named = [c for c in competitor_names if re.search(r"(?<!\w)" + re.escape(c) + r"(?!\w)", text, re.IGNORECASE)]
+    if named:
+        flags.append("mentions_cited_competitor:" + ",".join(dict.fromkeys(named)))
+    if removed or unknown:
+        # commas that only separated removed adjectives ("the best, seamless checkout")
+        text = re.sub(_REMOVED + r"\s*,", _REMOVED, re.sub(r",\s*" + _REMOVED, _REMOVED, text))
+        text = _fix_articles(text)
+        text = re.sub(r"\s+([,.;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", text))
+        text = re.sub(r",\s*,", ",", re.sub(r"\(\s*\)", "", text)).strip()
+    return text, flags
+
+
+# ---------- quote quality ----------
+
+MIN_QUOTE_WORDS = 8
+MIN_QUOTE_CHARS = 40
+_MENU_SEPARATORS = "|\u2022\u00b7\u00bb\u203a>/\u2013\u2014"
+
+
+def quote_quality(quote: str, page: PageText, other_pages: Sequence[str] = ()) -> Optional[str]:
+    """
+    Why a target quote is too weak to prove coverage, or None if it is usable:
+    too_short, menu_like (separators, or a run of capitalised words with no
+    sentence punctuation), page_chrome (only in the header/nav/footer/aside),
+    not_in_main_content, or repeated_on_other_target_pages (site-wide text).
+    """
+    words = normalize_for_match(quote).split()
+    if len(words) < MIN_QUOTE_WORDS or len(" ".join(words)) < MIN_QUOTE_CHARS:
+        return "too_short"
+    raw_words = [w for w in quote.split() if any(ch.isalpha() for ch in w)]
+    separators = sum(quote.count(ch) for ch in _MENU_SEPARATORS) + quote.count(" - ")
+    capitalised = sum(1 for w in raw_words if w.lstrip("\"'(")[:1].isupper())
+    if separators >= 2 or (
+        len(raw_words) >= 6 and capitalised / len(raw_words) >= 0.6 and not re.search(r"[.!?;:,]", quote)
+    ):
+        return "menu_like"
+    if page.main is not None:
+        if not quote_in_text(quote, page.main):
+            return "page_chrome" if page.chrome and quote_in_text(quote, page.chrome) else "not_in_main_content"
+    if any(quote_in_text(quote, other) for other in other_pages):
+        return "repeated_on_other_target_pages"
+    return None
+
+
 # ---------- coverage judgement ----------
 
 def apply_judgements(
     claims: Sequence[Claim],
     reply: Any,
-    target_texts: Mapping[str, str],
+    target_texts: Mapping[str, Union[str, PageText]],
     source_urls: Mapping[str, str],
+    competitor_names: Sequence[str] = (),
 ) -> List[Dict[str, Any]]:
     """
     Gap rows for the judged claims. A status the model did not give becomes
-    missing; "covered" needs a quote found on a target page (else "partly", flagged);
-    suggestions are kept only for missing/partly claims, with any figure that is
-    not on a target page flagged. target_texts: target URL -> full text.
+    missing. "covered" needs a quote found on a target page that passes
+    quote_quality (main content, long enough, not menu or site-wide text); a
+    weak or unverified quote downgrades it to "partly", flagged. Suggestions are
+    kept only for missing/partly claims and go through check_suggestion.
+    target_texts: target URL -> text (or PageText with sections).
     """
     verdicts = {}
     entries, _ = reply_entries(reply, "judgements")
     for entry in entries:
         if isinstance(entry, Mapping) and entry.get("claim_id"):
             verdicts.setdefault(str(entry["claim_id"]).strip(), entry)
-    all_target_text = "\n".join(target_texts.values())
-    target_numbers = set(numbers_in(all_target_text))
+    pages = {url: as_page(value) for url, value in target_texts.items()}
+    all_target_text = "\n".join(p.text for p in pages.values())
 
     rows = []
     for claim in claims:
@@ -334,26 +471,33 @@ def apply_judgements(
             flags.append("no_verdict" if not verdict else "invalid_status")
             status = "missing"
         quote = str(verdict.get("target_quote") or "").strip() or None
-        quote_url = None
+        quote_url = quality = None
         if quote:
-            quote_url = next((u for u, t in target_texts.items() if quote_in_text(quote, t)), None)
+            quote_url = next((u for u, p in pages.items() if quote_in_text(quote, p.text)), None)
             if quote_url is None:
                 flags.append("target_quote_not_found")
                 quote = None
+            else:
+                others = [p.text for u, p in pages.items() if u != quote_url]
+                quality = quote_quality(quote, pages[quote_url], others)
         if status == "covered" and quote is None:
             status = "partly"
             flags.append("covered_without_verified_quote")
+        elif status == "covered" and quality:
+            status = "partly"
+            flags.append(f"weak_covered_quote:{quality}")
+        elif quality:
+            flags.append(f"weak_quote:{quality}")
         if status == "missing":
-            quote, quote_url = None, None
+            quote, quote_url, quality = None, None, None
 
-        suggestion = None
+        suggestion = original = None
         if status in ("missing", "partly"):
-            suggestion = str(verdict.get("suggestion") or "").strip() or (
+            original = str(verdict.get("suggestion") or "").strip() or (
                 f"Add a section that addresses: {claim.claim} Use your own verified details; add your real figures."
             )
-            unknown = [n for n in numbers_in(suggestion) if n not in target_numbers]
-            if unknown:
-                flags.append("suggestion_figures_not_on_target_page:" + ",".join(dict.fromkeys(unknown)))
+            suggestion, suggestion_flags = check_suggestion(original, all_target_text, competitor_names)
+            flags.extend(suggestion_flags)
         rows.append({
             "claim_id": claim.claim_id,
             "claim": claim.claim,
@@ -364,7 +508,9 @@ def apply_judgements(
             "target_status": status,
             "target_quote": quote,
             "target_url": quote_url,
+            "target_quote_quality": "ok" if quote and not quality else quality,
             "suggestion": suggestion,
+            "suggestion_original": original if original != suggestion else None,
             "flags": flags,
         })
     return rows
@@ -421,11 +567,14 @@ def build_judge_prompt(query: str, brand: str, claims: Sequence[Claim], excerpts
         "- missing: the target pages do not address it\n"
         "For covered or partly, give target_quote: a short verbatim excerpt (5-30 words) copied exactly from the "
         "target excerpts. For missing, target_quote is null.\n"
+        "A quote from navigation, menus, headers or footers does not show coverage: quote a full sentence from the "
+        "page's main content, or choose partly or missing.\n"
         f"For partly or missing, give suggestion: one or two sentences on what {brand} could add to its page to "
-        "address the claim. The suggestion must be truthful: never invent statistics, prices, dates, reviews, "
-        "awards or claims about competitors, and never present a competitor's figure as the brand's. Where a "
-        f"number is needed that is not in {brand}'s excerpts, write \"[add your real figure]\". "
-        "For covered, suggestion is null.\n"
+        "address the claim. The suggestion must state only verifiable facts about the brand's own offering: "
+        "no superlatives or promotional wording (such as best, leading, industry-leading, top, fastest, number one, "
+        "world-class, unmatched, most trusted, seamless), no claims about competitors, and no invented statistics, "
+        "prices, dates, reviews or awards. Never present a competitor's figure as the brand's. Write "
+        "\"[add your real figure]\" in place of any number. For covered, suggestion is null.\n"
         'Return JSON: {"judgements": [{"claim_id": "C1", "status": "covered|partly|missing", '
         '"target_quote": "..." or null, "suggestion": "..." or null}]}\n\n'
         f"CLAIMS:\n{claim_lines}\n\nTARGET PAGE EXCERPTS:\n{page_blocks}"
@@ -444,6 +593,19 @@ class EmptyModelReply(ValueError):
 
 class ModelQuotaExhausted(RuntimeError):
     """A daily quota ran out: further calls today would only fail, so none are made."""
+
+
+class ModelCallTimeout(TimeoutError):
+    pass
+
+
+class RunDeadlineExceeded(RuntimeError):
+    """The whole-run time limit passed: no further calls are made."""
+
+
+def _is_timeout(error: Exception) -> bool:
+    return isinstance(error, (asyncio.TimeoutError, TimeoutError)) or "timed out" in str(error).lower() \
+        or "Timeout" in type(error).__name__
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -468,12 +630,14 @@ class GeminiJSONModel:
     JSON text generation on one Gemini model (the configured EVIDENCE_EXTRACTION
     model), with capped exponential backoff on 503/429. A reply that is not valid
     JSON is retried once. A 429 for a daily quota is not retried, and no further
-    calls are made. Every attempt is counted; no fallback-model rotation, so the
-    count is exact. Never calls embeddings.
+    calls are made. Each call is capped at call_timeout seconds (not retried on
+    timeout), and no call starts after the run deadline. Every attempt is
+    counted; no fallback-model rotation, so the count is exact. Never calls
+    embeddings.
     """
 
     def __init__(self, model_name: Optional[str] = None, max_retries: int = 3, base_delay: float = 4.0,
-                 max_attempts: int = 40, json_retries: int = 1,
+                 max_attempts: int = 40, json_retries: int = 1, call_timeout: float = 60.0,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
         from .constants import get_model_for_role
         from .llm_providers.factory import get_llm_provider
@@ -482,15 +646,60 @@ class GeminiJSONModel:
         self._provider = get_llm_provider(self.model_name)
         self.max_retries, self.base_delay, self.max_attempts, self._sleep = max_retries, base_delay, max_attempts, sleep
         self.json_retries = json_retries
+        self.call_timeout = call_timeout
+        self.deadline: Optional[float] = None  # time.monotonic() after which no call starts
         self.quota_exhausted: Optional[str] = None
         self.calls: List[Dict[str, Any]] = []
 
-    async def generate_json(self, stage: str, prompt: str, max_tokens: int = 4096) -> Any:
+    def set_time_limit(self, seconds: float) -> None:
+        self.deadline = time.monotonic() + seconds
+
+    def _call_timeout(self) -> float:
+        if self.deadline is None:
+            return self.call_timeout
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunDeadlineExceeded("run time limit reached; call not made")
+        return min(self.call_timeout, remaining)
+
+    async def _request(self, prompt: str, max_tokens: int, json_mode: bool, timeout: float):
         from google.genai import types
 
         config = types.GenerateContentConfig(
-            temperature=0.0, max_output_tokens=max_tokens, response_mime_type="application/json"
+            temperature=0.0, max_output_tokens=max_tokens,
+            response_mime_type="application/json" if json_mode else None,
+            http_options=types.HttpOptions(timeout=int(timeout * 1000)),
         )
+        await self._provider.rate_limiter.wait_for_slot(self.model_name)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(
+                self._provider.client.models.generate_content,
+                model=self.model_name, contents=prompt, config=config,
+            ), timeout=timeout + 5)
+        except asyncio.TimeoutError:
+            raise ModelCallTimeout(f"model call timed out after {timeout:.0f}s")
+
+    async def preflight(self) -> None:
+        """
+        One tiny text-generation call, before a report starts. Raises on failure
+        (a daily-quota 429 also sets quota_exhausted); any reply counts as a pass.
+        """
+        if self.quota_exhausted:
+            raise ModelQuotaExhausted(self.quota_exhausted)
+        started = time.monotonic()
+        record: Dict[str, Any] = {"stage": "preflight", "attempt": 1, "model": self.model_name}
+        self.calls.append(record)
+        try:
+            await self._request('Reply with the JSON {"ok": true}.', 1024, False, min(self.call_timeout, 30.0))
+            record.update(ok=True, seconds=round(time.monotonic() - started, 2))
+        except Exception as exc:
+            record.update(ok=False, error=f"{type(exc).__name__}: {str(exc)[:600]}",
+                          seconds=round(time.monotonic() - started, 2))
+            if _is_daily_quota(exc):
+                self.quota_exhausted = f"daily quota exhausted on {self.model_name}"
+            raise
+
+    async def generate_json(self, stage: str, prompt: str, max_tokens: int = 4096) -> Any:
         transient_retries = json_failures = 0
         attempt = 0
         while True:
@@ -498,16 +707,13 @@ class GeminiJSONModel:
                 raise ModelQuotaExhausted(f"not called: {self.quota_exhausted}")
             if len(self.calls) >= self.max_attempts:
                 raise ModelCallBudgetExceeded(f"model call cap of {self.max_attempts} reached")
+            timeout = self._call_timeout()
             attempt += 1
             started = time.monotonic()
             record: Dict[str, Any] = {"stage": stage, "attempt": attempt, "model": self.model_name}
             self.calls.append(record)
             try:
-                await self._provider.rate_limiter.wait_for_slot(self.model_name)
-                response = await asyncio.to_thread(
-                    self._provider.client.models.generate_content,
-                    model=self.model_name, contents=prompt, config=config,
-                )
+                response = await self._request(prompt, max_tokens, True, timeout)
                 record["seconds"] = round(time.monotonic() - started, 2)
                 try:
                     record["finish_reason"] = str(response.candidates[0].finish_reason)
@@ -524,6 +730,8 @@ class GeminiJSONModel:
                 record.setdefault("seconds", round(time.monotonic() - started, 2))
                 if _is_daily_quota(exc):
                     self.quota_exhausted = f"daily quota exhausted on {self.model_name}"
+                    raise
+                if _is_timeout(exc):
                     raise
                 if isinstance(exc, (json.JSONDecodeError, EmptyModelReply)) and json_failures < self.json_retries:
                     json_failures += 1
@@ -556,33 +764,58 @@ Crawler = Callable[[str], Awaitable[Dict[str, Any]]]
 async def _default_crawler(url: str) -> Dict[str, Any]:
     from . import crawl
 
-    return await crawl.crawl_text(url)
+    return await crawl.crawl_sections(url)  # text only, plus main content vs header/nav/footer
 
 
 class TextStore:
-    """Page text by URL: backend-provided crawled text first, then one crawl per page for the whole report."""
+    """
+    Page text by URL: backend-provided crawled text first, then one crawl per page
+    for the whole report. Target pages are crawled once even when cached, to
+    separate main content from header/nav/footer (the cached text is flattened);
+    the cached text is used if that crawl fails.
+    """
 
     def __init__(self, cached: Mapping[str, str], crawler: Crawler):
         self._texts = {page_key(u): t for u, t in cached.items() if t}
         self._origin = {k: "cache" for k in self._texts}
+        self._sections: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
         self._errors: Dict[str, str] = {}
+        self._crawled: set = set()
         self._crawler = crawler
+
+    async def _crawl(self, url: str) -> None:
+        key = page_key(url)
+        self._crawled.add(key)
+        try:
+            result = await self._crawler(url)
+        except Exception as exc:  # a crawl failure only removes this page
+            result = {"error": f"{type(exc).__name__}: {exc}"}
+        result = result or {}
+        text = result.get("full_content") or ""
+        if text.strip():
+            self._texts[key], self._origin[key] = text, "crawled"
+            if result.get("main_content") is not None:
+                self._sections[key] = (result.get("main_content"), result.get("chrome_content") or "")
+        elif key not in self._texts:
+            self._errors[key] = result.get("error") or "no page text"
 
     async def get(self, url: str) -> Tuple[Optional[str], str, Optional[str]]:
         key = page_key(url)
-        if key not in self._texts and key not in self._errors:
-            try:
-                result = await self._crawler(url)
-            except Exception as exc:  # a crawl failure only removes this page
-                result = {"error": f"{type(exc).__name__}: {exc}"}
-            text = (result or {}).get("full_content") or ""
-            if text.strip():
-                self._texts[key], self._origin[key] = text, "crawled"
-            else:
-                self._errors[key] = (result or {}).get("error") or "no page text"
+        if key not in self._texts and key not in self._crawled:
+            await self._crawl(url)
         if key in self._texts:
             return self._texts[key], self._origin[key], None
         return None, "unavailable", self._errors.get(key)
+
+    async def get_page(self, url: str) -> Tuple[Optional[PageText], str, Optional[str]]:
+        key = page_key(url)
+        if key not in self._sections and key not in self._crawled:
+            await self._crawl(url)
+        text, origin, error = await self.get(url)
+        if text is None:
+            return None, origin, error
+        main, chrome = self._sections.get(key, (None, None))
+        return PageText(text, main, chrome), origin + ("+sections" if main is not None else ""), None
 
 
 async def analyze_query(
@@ -631,15 +864,16 @@ async def analyze_query(
     source_urls = {row["label"]: row["url"] for row in result["sources"]}
     appearances = {row["label"]: row["appearances"] or 0 for row in result["sources"]}
 
-    target_texts: Dict[str, str] = {}
+    target_texts: Dict[str, PageText] = {}
     for n, target in enumerate(targets, start=1):
-        text, origin, crawl_error = await store.get(target["url"])
+        page, origin, crawl_error = await store.get_page(target["url"])
         result["target_pages"].append({
             "label": f"T{n}", "url": target["url"], "submitted": target.get("submitted", False),
             "appearances": target.get("appearances"), "text_source": origin, "error": crawl_error,
         })
-        if text:
-            target_texts[target["url"]] = text
+        if page:
+            target_texts[target["url"]] = page
+    competitor_names = cited_brand_names(cited, brand)
 
     if not items:
         result["errors"].append("no verified evidence from the cited sources")
@@ -657,7 +891,7 @@ async def analyze_query(
 
     if not target_texts:
         result["errors"].append("no target page text; coverage not judged")
-        rows = apply_judgements(judged, {}, {}, source_urls)
+        rows = apply_judgements(judged, {}, {}, source_urls, competitor_names)
         for row in rows:
             row["flags"].append("target_text_unavailable")
         result["gaps"] = rank_gaps(rows)
@@ -665,10 +899,10 @@ async def analyze_query(
 
     excerpts = []
     for page in result["target_pages"]:
-        text = target_texts.get(page["url"])
-        if text:
+        target_page = target_texts.get(page["url"])
+        if target_page:  # main content when known, so menus and footers are not offered as evidence
             excerpts.append({"label": page["label"], "url": page["url"],
-                             "excerpt": select_excerpt(text, query["query"], judged, budget)})
+                             "excerpt": select_excerpt(target_page.main or target_page.text, query["query"], judged, budget)})
     try:
         verdicts = await model.generate_json(
             "judge", build_judge_prompt(query["query"], brand, judged, excerpts), max_tokens=JUDGE_MAX_TOKENS
@@ -676,25 +910,58 @@ async def analyze_query(
     except Exception as exc:
         result["errors"].append(f"coverage judgement failed: {str(exc)[:200]}")
         verdicts = {}
-    result["gaps"] = rank_gaps(apply_judgements(judged, verdicts, target_texts, source_urls))
+    result["gaps"] = rank_gaps(apply_judgements(judged, verdicts, target_texts, source_urls, competitor_names))
     return result
 
 
-async def run_gap_analysis(payload: Mapping[str, Any], model=None, crawler: Optional[Crawler] = None) -> Dict[str, Any]:
+_GENERIC_LABELS = {"blog", "www", "docs", "help", "support", "news", "business", "india", "online", "store", "shop"}
+
+
+def cited_brand_names(cited: Sequence[Mapping[str, Any]], brand: str) -> List[str]:
+    """Brand-like names of the cited sources (domain labels), for flagging suggestions that name them."""
+    names = []
+    for source in cited:
+        label = normalize_domain(source.get("domain") or source.get("url") or "").split(".")[0]
+        if len(label) >= 4 and label not in _GENERIC_LABELS and label != brand.lower():
+            names.append(label)
+    return list(dict.fromkeys(names))
+
+
+RUN_TIME_LIMIT_SECONDS = 600.0
+
+
+async def run_gap_analysis(
+    payload: Mapping[str, Any], model=None, crawler: Optional[Crawler] = None,
+    time_limit: float = RUN_TIME_LIMIT_SECONDS,
+) -> Dict[str, Any]:
     """
     payload: {observation_id, sandbox_url, brand_name, queries: [{query_index,
     query, sources: [{url, domain, title, category, competitor_group,
     appearances, stability, best_position}]}], cached_texts: {url: text}}.
-    Queries run one after another; extraction runs a few calls at a time.
+    Queries run one after another; extraction runs a few calls at a time. After
+    time_limit seconds no model call starts and remaining queries are skipped,
+    so the report comes back with what was done.
     """
     model = model or GeminiJSONModel()
+    if hasattr(model, "set_time_limit"):
+        model.set_time_limit(time_limit)
     store = TextStore(payload.get("cached_texts") or {}, crawler or _default_crawler)
     sandbox_url = payload["sandbox_url"]
     brand = payload.get("brand_name") or normalize_domain(sandbox_url).split(".")[0].capitalize()
     started = time.monotonic()
     queries = []
+    deadline_reached = False
     for query in payload.get("queries") or []:
+        if time.monotonic() - started >= time_limit:
+            deadline_reached = True
+            queries.append({"query_index": query.get("query_index"), "query": query["query"], "sources": [],
+                            "target_pages": [], "gaps": [], "other_claims": [],
+                            "errors": [f"not analyzed: the {time_limit:.0f}-second run limit was reached"]})
+            continue
         queries.append(await analyze_query(query, sandbox_url, brand, store, model))
+    deadline_reached = deadline_reached or any(
+        "RunDeadlineExceeded" in (c.get("error") or "") for c in getattr(model, "calls", [])
+    ) or any("run time limit" in e for q in queries for e in q["errors"])
     calls = getattr(model, "calls", [])
     return {
         "version": GAP_VERSION,
@@ -710,7 +977,10 @@ async def run_gap_analysis(payload: Mapping[str, Any], model=None, crawler: Opti
             "per_source_token_cap": PER_SOURCE_TOKEN_CAP,
             "min_source_tokens": MIN_SOURCE_TOKENS,
             "chars_per_token": CHARS_PER_TOKEN,
+            "call_timeout_seconds": getattr(model, "call_timeout", None),
+            "run_time_limit_seconds": time_limit,
         },
+        "deadline_reached": deadline_reached,
         "model_calls": {**summarize_calls(calls), "quota_exhausted": getattr(model, "quota_exhausted", None),
                         "calls": list(calls)},
         "seconds": round(time.monotonic() - started, 1),
@@ -718,20 +988,52 @@ async def run_gap_analysis(payload: Mapping[str, Any], model=None, crawler: Opti
     }
 
 
-async def run_gap_analysis_job(report_id: str, payload: Mapping[str, Any]) -> None:
+class GapPreflightError(RuntimeError):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+async def preflight_and_start(
+    report_id: str, payload: Mapping[str, Any], model=None,
+    launch: Callable[[Awaitable[None]], Any] = asyncio.create_task,
+):
+    """
+    One tiny text-generation call; only if it succeeds is the report job launched.
+    A daily-quota 429 raises GapPreflightError(429), anything else (503s after
+    the call's own handling, timeouts) GapPreflightError(503). Nothing is started
+    or saved on failure.
+    """
+    model = model or GeminiJSONModel()
+    try:
+        await model.preflight()
+    except Exception as exc:
+        if _is_daily_quota(exc) or getattr(model, "quota_exhausted", None):
+            raise GapPreflightError(
+                429, f"Gemini daily quota is exhausted for {model.model_name}; gap analysis not started, nothing saved."
+            ) from exc
+        raise GapPreflightError(
+            503, f"Gemini preflight call failed ({type(exc).__name__}: {str(exc)[:200]}); gap analysis not started."
+        ) from exc
+    return launch(run_gap_analysis_job(report_id, payload, model=model))
+
+
+async def run_gap_analysis_job(report_id: str, payload: Mapping[str, Any], model=None) -> None:
     """Background job: build the report and post it (or the failure) to the backend."""
     import httpx
 
     backend = os.getenv("BACKEND_BASE_URL", "http://localhost:4000")
-    model = None
     try:
-        model = GeminiJSONModel()
-        body = {"status": "completed", "report": await run_gap_analysis(payload, model=model)}
+        model = model or GeminiJSONModel()
+        # Safety net over the run's own limit: crawls or a stuck thread cannot hold the job much longer
+        report = await asyncio.wait_for(run_gap_analysis(payload, model=model), timeout=RUN_TIME_LIMIT_SECONDS + 60)
+        body = {"status": "completed", "report": report}
     except Exception as exc:
         logger.exception(f"[gap_analysis] report {report_id} failed")
         calls = getattr(model, "calls", [])
         body = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:500]}",
                 "report": {"version": GAP_VERSION, "model_calls": {**summarize_calls(calls), "calls": list(calls)}}}
+    body["observation_id"] = payload.get("observation_id")
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(f"{backend}/api/gap-analysis/{report_id}/result", json=body)
         if response.status_code >= 400:

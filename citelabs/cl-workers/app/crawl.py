@@ -93,6 +93,46 @@ async def crawl_text(url: str) -> Dict[str, Any]:
     return {"title": _safe_text(soup.title), "h1": _first_heading_text(soup), "full_content": _extract_text(soup)}
 
 
+# Page chrome: site-wide header, navigation, footer and side areas
+_CHROME_TAGS = ("header", "nav", "footer", "aside")
+_CHROME_ROLES = ("banner", "navigation", "contentinfo", "complementary")
+
+
+def split_page_sections(html: str) -> Dict[str, str]:
+    """
+    Page text split into main content and chrome (header, nav, footer, aside and
+    their ARIA roles), whitespace-collapsed like crawl_text's full_content.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    _strip_unused_tags(soup)
+    full = _extract_text(soup)
+    chrome_parts = []
+    chrome = soup.find_all(list(_CHROME_TAGS)) + soup.find_all(attrs={"role": list(_CHROME_ROLES)})
+    for element in chrome:
+        if element.decomposed:  # already removed as part of an outer chrome element
+            continue
+        chrome_parts.append(" ".join(element.get_text(separator=" ", strip=True).split()))
+        element.decompose()
+    return {"full_content": full, "main_content": _extract_text(soup), "chrome_content": " ".join(p for p in chrome_parts if p)}
+
+
+async def crawl_sections(url: str) -> Dict[str, Any]:
+    """
+    Like crawl_text (no LLM call), plus the page text split into main content
+    and chrome, so a quote can be checked for coming from navigation or a footer.
+    Returns {"error": ...} on failure.
+    """
+    try:
+        html = await run_in_threadpool(_fetch_html, url)
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code if e.response is not None else "unknown"
+        return {"error": f"Failed to crawl: HTTP {status_code}"}
+    except Exception as e:
+        return {"error": f"Failed to crawl: {type(e).__name__} - {str(e)[:200]}"}
+    sections = split_page_sections(html)
+    return {"title": _safe_text(BeautifulSoup(html, "html.parser").title), **sections}
+
+
 def describe_crawler() -> str:
     """
     Returns a human-readable description of how this crawler appears to websites.

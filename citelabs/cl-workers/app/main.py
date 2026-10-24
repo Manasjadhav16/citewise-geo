@@ -278,17 +278,22 @@ class GapAnalysisStartRequest(BaseModel):
 
 @app.post("/gap-analysis/start")
 async def gap_analysis_start_endpoint(request: GapAnalysisStartRequest):
-    """Start a competitive gap analysis for a Stage 1 observation; the report is posted back to the backend."""
-    import asyncio
-
+    """
+    Start a competitive gap analysis for a Stage 1 observation; the report is
+    posted back to the backend. One tiny model call runs first: a daily-quota 429
+    returns 429 and any other failure 503, with nothing started.
+    """
     from fastapi import HTTPException
 
-    from .gap_analysis import run_gap_analysis_job
+    from .gap_analysis import GapPreflightError, preflight_and_start
 
     payload = request.payload
     if not payload.get("sandbox_url") or not payload.get("queries"):
         raise HTTPException(status_code=400, detail="payload needs sandbox_url and queries")
-    asyncio.create_task(run_gap_analysis_job(request.report_id, payload))
+    try:
+        await preflight_and_start(request.report_id, payload)
+    except GapPreflightError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     return {"message": "Gap analysis started", "report_id": request.report_id}
 
 

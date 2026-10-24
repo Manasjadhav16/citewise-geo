@@ -128,7 +128,8 @@ class TestClaimCounting:
 
 
 class TestJudgements:
-    TARGET = {"https://acme.in/p": "Acme charges 2% per card payment. Settlement happens in T+2 days."}
+    TARGET = {"https://acme.in/p": "Acme charges 2% per card payment on all standard plans for Indian merchants. "
+                                   "Settlement happens in T+2 days."}
 
     def claims(self):
         return count_claims({"claims": [
@@ -139,7 +140,7 @@ class TestJudgements:
 
     def test_statuses_quotes_and_flags(self):
         reply = {"judgements": [
-            {"claim_id": "C1", "status": "covered", "target_quote": "Acme charges 2% per card payment", "suggestion": None},
+            {"claim_id": "C1", "status": "covered", "target_quote": "Acme charges 2% per card payment on all standard plans", "suggestion": None},
             {"claim_id": "C2", "status": "covered", "target_quote": "Acme settles instantly"},  # quote not on the page
             {"claim_id": "C3", "status": "missing", "target_quote": None,
              "suggestion": "State your UPI MDR; competitors say 0.3%. [add your real figure]"},
@@ -151,6 +152,8 @@ class TestJudgements:
         assert rows["C2"]["flags"] == ["target_quote_not_found", "covered_without_verified_quote"]
         assert rows["C3"]["target_status"] == "missing" and rows["C3"]["target_quote"] is None
         assert "suggestion_figures_not_on_target_page:0.3" in rows["C3"]["flags"]
+        assert rows["C3"]["suggestion"] == "State your UPI MDR; competitors say [add your real figure]. [add your real figure]"
+        assert rows["C1"]["target_quote_quality"] == "ok"
 
     def test_missing_verdict_defaults_to_missing_with_safe_suggestion(self):
         rows = apply_judgements(self.claims()[:1], {}, self.TARGET, {})
@@ -198,7 +201,8 @@ class FakeModel:
 PAGES = {
     "https://a.com/fees": "Card MDR in India is 2% on most gateways. UPI transactions have zero MDR for merchants.",
     "https://b.com/fees": "Most gateways charge 2% card MDR. Setup fees range from nothing upward.",
-    "https://acme.in/payment-gateway/": "Acme Payment Gateway. Accept cards and UPI. Pricing: 2% per card payment.",
+    "https://acme.in/payment-gateway/": "Acme Payment Gateway. Accept cards and UPI. "
+                                        "Pricing: 2% per card payment on every standard plan for Indian merchants.",
 }
 
 
@@ -226,7 +230,7 @@ class TestReport:
                 {"claim": "UPI has zero MDR", "item_ids": ["S1.2"]},
             ]},
             judge_reply={"judgements": [
-                {"claim_id": "C1", "status": "covered", "target_quote": "Pricing: 2% per card payment", "suggestion": None},
+                {"claim_id": "C1", "status": "covered", "target_quote": "Pricing: 2% per card payment on every standard plan", "suggestion": None},
                 {"claim_id": "C2", "status": "missing", "target_quote": None, "suggestion": "State your UPI MDR: [add your real figure]."},
             ]},
         )
@@ -244,7 +248,8 @@ class TestReport:
         report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
         assert crawled == ["https://b.com/fees", "https://dead.com/x", SANDBOX]  # cached page not re-crawled
         assert set(report) == {"version", "observation_id", "sandbox_url", "brand_name", "generated_at", "model",
-                               "settings", "model_calls", "seconds", "queries"}
+                               "settings", "model_calls", "seconds", "queries", "deadline_reached"}
+        assert report["deadline_reached"] is False and report["settings"]["run_time_limit_seconds"] == 600
         assert report["version"] == "gap_v1" and report["model"] == "fake-model"
         assert report["model_calls"]["total"] == 4  # 2 extractions (dead page skipped), 1 grouping, 1 judgement
         assert report["model_calls"]["by_stage"] == {"extract": 2, "cluster": 1, "judge": 1}
@@ -261,7 +266,7 @@ class TestReport:
             (1, "Card MDR is about 2%", 2, "covered"), (2, "UPI has zero MDR", 1, "missing"),
         ]
         assert gaps[0]["sources"] == ["https://a.com/fees", "https://b.com/fees"]
-        assert gaps[0]["target_quote"] == "Pricing: 2% per card payment" and gaps[0]["suggestion"] is None
+        assert gaps[0]["target_quote"] == "Pricing: 2% per card payment on every standard plan" and gaps[0]["suggestion"] is None
         assert gaps[1]["suggestion"] == "State your UPI MDR: [add your real figure]." and gaps[1]["flags"] == []
         assert {"source", "quote"} <= set(gaps[0]["source_quotes"][0])
         assert q["other_claims"] == [] and q["errors"] == []
@@ -351,3 +356,201 @@ class TestModelRetries:
         run(model.generate_json("extract", "p"))
         with pytest.raises(ga.ModelCallBudgetExceeded):
             run(model.generate_json("extract", "p"))
+
+
+# ---------- honesty, weak quotes, preflight and time limits ----------
+
+class TestSuggestionHonesty:
+    def test_superlatives_removed_unless_the_target_uses_them(self):
+        text, flags = ga.check_suggestion(
+            "Mention that Acme offers instant settlements alongside industry-leading competitive pricing and the "
+            "best, seamless checkout.", "Acme Payment Gateway. Instant settlements for merchants.")
+        assert text == "Mention that Acme offers instant settlements alongside competitive pricing and the checkout."
+        assert flags == ["promotional_wording_removed:industry-leading,seamless,best"]
+        kept, flags = ga.check_suggestion("Explain why merchants call it the fastest checkout.", "The fastest checkout in India.")
+        assert kept == "Explain why merchants call it the fastest checkout." and flags == []
+
+    def test_article_and_spacing_fixed_after_removal(self):
+        text, _ = ga.check_suggestion("Add an industry-leading uptime section.", "Acme")
+        assert text == "Add an uptime section."
+        text, _ = ga.check_suggestion("Describe a top UPI integration.", "Acme")
+        assert text == "Describe a UPI integration."
+        text, _ = ga.check_suggestion("Offer a world-class API.", "Acme")
+        assert text == "Offer an API."
+        for ordinary in ("Add a top-up FAQ.", "List best practices for retries.", "Explain what is leading to failures.",
+                         "Put the fees at the top of the page.", "Keep a summary on top of the pricing table."):
+            assert ga.check_suggestion(ordinary, "Acme") == (ordinary, [])
+
+    def test_numbers_become_placeholders_and_competitors_are_flagged(self):
+        text, flags = ga.check_suggestion("Say your MDR is 1.9% like Cashfree, settled in 2 days.", "Settled in 2 days.", ["cashfree"])
+        assert text == "Say your MDR is [add your real figure] like Cashfree, settled in 2 days."
+        assert flags == ["suggestion_figures_not_on_target_page:1.9", "mentions_cited_competitor:cashfree"]
+
+    def test_superlative_in_a_judged_suggestion(self):
+        claims = count_claims({}, [item("S1.1", "Instant settlements")], {})
+        rows = apply_judgements(claims, {"judgements": [{"claim_id": "C1", "status": "missing",
+                                "suggestion": "Highlight Acme's world-class, unmatched instant settlements."}]},
+                                {"https://acme.in": "Acme accepts cards and UPI from customers across India."}, {})
+        assert rows[0]["suggestion"] == "Highlight Acme's instant settlements."
+        assert rows[0]["suggestion_original"] == "Highlight Acme's world-class, unmatched instant settlements."
+        assert "promotional_wording_removed:world-class,unmatched" in rows[0]["flags"]
+
+    def test_prompt_states_the_honesty_rules(self):
+        claims = count_claims({}, [item("S1.1", "x")], {})
+        prompt = ga.build_judge_prompt("q", "Acme", claims, [{"label": "T1", "url": "u", "excerpt": "e"}])
+        assert "only verifiable facts" in prompt and "no superlatives" in prompt
+        assert "no claims about competitors" in prompt and "[add your real figure]\" in place of any number" in prompt
+
+
+NAV = "For Startups & SMEs For Enterprises Pricing Blog Learn Events White papers Customer Stories Developer Docs"
+MAIN = "Razorpay lets businesses accept payments through cards, UPI, netbanking and wallets on a single integration."
+
+
+class TestWeakCoveredQuotes:
+    def test_quote_quality_rules(self):
+        page = ga.PageText(NAV + " " + MAIN, main=MAIN, chrome=NAV)
+        assert ga.quote_quality("accept payments through cards", page) == "too_short"
+        assert ga.quote_quality(NAV, ga.PageText(NAV + " " + MAIN)) == "menu_like"
+        assert ga.quote_quality("Home | Pricing | Docs | Careers | Partners | Contact us today for help", ga.PageText("x")) == "menu_like"
+        footer = "Copyright 2026 Razorpay Software Private Limited, all rights reserved here."
+        page = ga.PageText(MAIN + " " + footer, main=MAIN, chrome=footer)
+        assert ga.quote_quality(footer, page) == "page_chrome"
+        assert ga.quote_quality(MAIN, page) is None
+        assert ga.quote_quality(MAIN, ga.PageText(MAIN), other_pages=["Intro. " + MAIN]) == "repeated_on_other_target_pages"
+
+    def test_navigation_quote_downgrades_covered_to_partly(self):
+        claims = count_claims({}, [item("S1.1", "Razorpay serves startups and enterprises")], {})
+        reply = {"judgements": [{"claim_id": "C1", "status": "covered", "target_quote": NAV[:90]}]}
+        rows = apply_judgements(claims, reply, {"https://razorpay.com/pg": ga.PageText(NAV + " " + MAIN, MAIN, NAV)}, {})
+        assert rows[0]["target_status"] == "partly"
+        assert rows[0]["flags"][0] in ("weak_covered_quote:menu_like", "weak_covered_quote:page_chrome")
+        assert rows[0]["target_quote_quality"] in ("menu_like", "page_chrome")
+        reply = {"judgements": [{"claim_id": "C1", "status": "covered", "target_quote": MAIN}]}
+        rows = apply_judgements(claims, reply, {"https://razorpay.com/pg": ga.PageText(NAV + " " + MAIN, MAIN, NAV)}, {})
+        assert rows[0]["target_status"] == "covered" and rows[0]["flags"] == []
+
+    def test_target_pages_crawled_for_sections_and_excerpts_skip_menus(self):
+        html_sections = {"full_content": NAV + " " + MAIN, "main_content": MAIN, "chrome_content": NAV}
+        crawled = []
+
+        async def crawler(url):
+            crawled.append(url)
+            return html_sections
+
+        store = ga.TextStore({SANDBOX: NAV + " " + MAIN}, crawler)
+        page, origin, error = run(store.get_page(SANDBOX))
+        assert (page.main, page.chrome, origin, error) == (MAIN, NAV, "crawled+sections", None)
+        run(store.get_page(SANDBOX))
+        assert crawled == [SANDBOX]  # once per report
+
+        async def failing(url):
+            return {"error": "Failed to crawl: HTTP 403"}
+
+        store = ga.TextStore({SANDBOX: MAIN}, failing)
+        page, origin, _ = run(store.get_page(SANDBOX))
+        assert (page.text, page.main, origin) == (MAIN, None, "cache")  # falls back to the cached text
+
+
+class TestModelReplyShapes:
+    def payload(self):
+        return TestReport().payload()
+
+    def test_bare_list_extraction_reply_is_used(self):
+        model = TestReport().model()
+        model.extract_replies["https://a.com/fees"] = [
+            {"type": "figure", "text": "Card MDR is 2%", "quote": "Card MDR in India is 2%"},
+        ]
+
+        async def crawler(url):
+            return {"full_content": PAGES.get(url, "")}
+
+        report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
+        s1 = report["queries"][0]["sources"][0]
+        assert (s1["items"], s1["reply_shape"]) == (1, "list")
+
+    def test_truncated_grouping_reply_falls_back_to_item_claims(self):
+        model = TestReport().model()
+
+        async def broken_cluster(stage, prompt, max_tokens=4096, _original=model.generate_json):
+            if stage == "cluster":
+                model.calls.append({"stage": stage, "attempt": 1, "ok": False})
+                return ga.parse_json_reply('{"claims": [{"claim": "Card MDR is about 2%", "item_ids": ["S1.1"')
+            return await _original(stage, prompt, max_tokens)
+
+        model.generate_json = broken_cluster
+
+        async def crawler(url):
+            return {"full_content": PAGES.get(url, "")}
+
+        report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
+        q = report["queries"][0]
+        assert q["errors"][0].startswith("claim grouping failed, items counted one by one")
+        assert [g["source_count"] for g in q["gaps"]] == [1, 1, 1]
+
+
+class TestPreflightAndLimits(TestModelRetries):
+    def test_daily_quota_preflight_aborts_without_starting(self, monkeypatch):
+        daily = RuntimeError("429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+        model, _ = self.make(monkeypatch, [daily])
+        launched = []
+        with pytest.raises(ga.GapPreflightError) as info:
+            run(ga.preflight_and_start("gap_1", {"sandbox_url": SANDBOX, "queries": [{}]}, model=model,
+                                       launch=launched.append))
+        assert info.value.status_code == 429 and "nothing saved" in str(info.value)
+        assert launched == [] and [c["stage"] for c in model.calls] == ["preflight"]
+
+    def test_preflight_success_launches_the_job(self, monkeypatch):
+        model, _ = self.make(monkeypatch, ["not even json"])  # any reply passes the preflight
+        launched = []
+
+        def launch(coro):
+            launched.append(coro)
+            coro.close()
+
+        run(ga.preflight_and_start("gap_1", {"sandbox_url": SANDBOX, "queries": [{}]}, model=model, launch=launch))
+        assert len(launched) == 1 and model.calls[0]["ok"] is True
+
+    def test_other_preflight_failure_is_503(self, monkeypatch):
+        model, _ = self.make(monkeypatch, [RuntimeError("503 UNAVAILABLE")])
+        with pytest.raises(ga.GapPreflightError) as info:
+            run(ga.preflight_and_start("gap_1", {}, model=model, launch=lambda c: c.close()))
+        assert info.value.status_code == 503
+
+    def test_call_timeout_is_not_retried(self, monkeypatch):
+        import time as _time
+
+        model, sleeps = self.make(monkeypatch, [])
+        model.call_timeout = 0.05
+
+        def slow(model, contents, config):
+            _time.sleep(0.3)
+
+        monkeypatch.setattr(model._provider.client.models, "generate_content", slow)
+        monkeypatch.setattr(ga.GeminiJSONModel, "_request", ga.GeminiJSONModel._request)
+        real_wait = asyncio.wait_for
+
+        async def short_wait(aw, timeout):
+            return await real_wait(aw, timeout=0.05)
+
+        monkeypatch.setattr(ga.asyncio, "wait_for", short_wait)
+        with pytest.raises(ga.ModelCallTimeout):
+            run(model.generate_json("extract", "p"))
+        assert len(model.calls) == 1 and sleeps == []
+
+    def test_no_call_after_the_run_deadline(self, monkeypatch):
+        model, _ = self.make(monkeypatch, ['{"a": 1}'])
+        model.set_time_limit(-1)
+        with pytest.raises(ga.RunDeadlineExceeded):
+            run(model.generate_json("extract", "p"))
+        assert model.calls == []
+
+    def test_run_limit_skips_remaining_queries(self):
+        payload = TestReport().payload()
+        payload["queries"].append({"query_index": 1, "query": "Second query", "sources": []})
+
+        async def crawler(url):
+            return {"full_content": PAGES.get(url, "")}
+
+        report = run(run_gap_analysis(payload, model=TestReport().model(), crawler=crawler, time_limit=0))
+        assert report["deadline_reached"] is True
+        assert all(q["errors"] == ["not analyzed: the 0-second run limit was reached"] for q in report["queries"])
