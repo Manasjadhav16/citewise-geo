@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { worker } from '../services/pythonClient';
+import { worker, WorkerRequestError } from '../services/pythonClient';
 
 const prisma = new PrismaClient();
 
@@ -10,7 +10,7 @@ const RESULT_BODY_LIMIT = 10 * 1024 * 1024;
 // Page text sent to the worker per page (the worker passes at most 40,000 characters to one call)
 const MAX_CACHED_CHARS = 40000;
 
-type ResultBody = { status?: string; report?: Record<string, any>; error?: string };
+type ResultBody = { status?: string; report?: Record<string, any>; error?: string; observation_id?: string };
 
 /** URL identity ignoring scheme, "www.", trailing slash and fragment (as runSeed.sameUrl). */
 function pageKey(url: string): string {
@@ -152,14 +152,22 @@ export default async function gapAnalysisRoutes(app: FastifyInstance) {
     if (built.payload.queries.length === 0) return reply.status(409).send({ error: 'Observation has no queries' });
 
     const reportId = `gap_${Date.now()}_${randomUUID().slice(0, 8)}`;
-    await prisma.gapReport.create({ data: { id: reportId, observationId: id, status: 'running' } });
     try {
+      // The worker makes one tiny model call before accepting: on failure nothing is started or saved
       await worker.startGapAnalysis({ report_id: reportId, payload: built.payload });
     } catch (err) {
+      if (err instanceof WorkerRequestError && (err.status === 429 || err.status === 503)) {
+        return reply.status(err.status).send({ error: err.detail || 'Gap analysis not started', saved: false });
+      }
       const message = err instanceof Error ? err.message : String(err);
-      await prisma.gapReport.update({ where: { id: reportId }, data: { status: 'failed', error: message } });
-      return reply.status(502).send({ error: 'Failed to start gap analysis', detail: message, report_id: reportId });
+      return reply.status(502).send({ error: 'Failed to start gap analysis', detail: message, saved: false });
     }
+    // Upsert: the worker's result can only arrive minutes later, but never fail on ordering
+    await prisma.gapReport.upsert({
+      where: { id: reportId },
+      create: { id: reportId, observationId: id, status: 'running' },
+      update: {},
+    });
     return reply.status(202).send({
       report_id: reportId,
       status: 'running',
@@ -172,18 +180,17 @@ export default async function gapAnalysisRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const body = (request.body || {}) as ResultBody;
     const existing = await prisma.gapReport.findUnique({ where: { id } });
-    if (!existing) return reply.status(404).send({ error: `Gap report ${id} not found` });
+    const observationId = existing?.observationId ?? body.observation_id;
+    if (!observationId) return reply.status(404).send({ error: `Gap report ${id} not found` });
     const status = body.status === 'completed' ? 'completed' : 'failed';
     const calls = body.report?.model_calls?.total;
-    await prisma.gapReport.update({
-      where: { id },
-      data: {
-        status,
-        report: body.report ? (body.report as Prisma.InputJsonValue) : Prisma.DbNull,
-        error: status === 'failed' ? body.error || 'unknown error' : null,
-        modelCalls: typeof calls === 'number' ? calls : null,
-      },
-    });
+    const data = {
+      status,
+      report: body.report ? (body.report as Prisma.InputJsonValue) : Prisma.DbNull,
+      error: status === 'failed' ? body.error || 'unknown error' : null,
+      modelCalls: typeof calls === 'number' ? calls : null,
+    };
+    await prisma.gapReport.upsert({ where: { id }, create: { id, observationId, ...data }, update: data });
     return reply.status(200).send({ message: 'Gap report stored' });
   });
 

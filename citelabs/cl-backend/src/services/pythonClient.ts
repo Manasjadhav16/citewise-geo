@@ -8,6 +8,13 @@ export type CrawlResponse = {
   error?: string;
 };
 
+/** A worker request that returned an HTTP error, with its status (e.g. 429 for an exhausted model quota). */
+export class WorkerRequestError extends Error {
+  constructor(message: string, public readonly status: number, public readonly detail: string) {
+    super(message);
+  }
+}
+
 export class Worker {
   constructor(private readonly baseUrl: string = DEFAULT_WORKER_BASE_URL) { }
 
@@ -295,8 +302,16 @@ export class Worker {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(
+      let detail = errorBody;
+      try {
+        detail = JSON.parse(errorBody).detail ?? errorBody;
+      } catch {
+        /* plain-text body */
+      }
+      throw new WorkerRequestError(
         `Worker /gap-analysis/start request failed with status ${response.status}: ${errorBody || 'no body'}`,
+        response.status,
+        String(detail || ''),
       );
     }
   }
