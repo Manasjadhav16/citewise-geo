@@ -346,9 +346,17 @@ python -m pytest
 
 Covers the token budget calculator, mean/median position, Jaccard similarity, mention vs citation rate, category breakdown percentages, source pools, seeding and tagging, and the Stage 2 orchestration in each seed mode (with every external call faked).
 
-### Content gap analysis (planned)
+### Competitive gap optimization (v1)
 
-`cl-workers/app/gap_analysis.py` defines `find_content_gaps(sandbox_evidence, competitor_evidence_list) -> List[Gap]`: the claims and topics that cited sources cover but the sandbox page does not, built from Stage 1's evidence. It is an interface only for now; the module docstring describes the intended approach.
+For a completed Stage 1 observation, `POST /api/observation/:id/gap-analysis` starts a report (`GET /api/observation/:id/gap-analysis` returns the latest; `GET /api/gap-analysis/:report_id` one report; stored in `gap_reports`). Per query, `cl-workers/app/gap_analysis.py`:
+
+1. takes the 5 most-cited non-target pages of the query's pool (by appearances, then best citation position) and the target's own pages, including the submitted one;
+2. reuses page text already crawled by Stage 2 runs and crawls only what is missing (text only);
+3. extracts query-relevant evidence from each cited page as JSON items (fact, figure, definition, product_detail, comparison, claim), each with a verbatim quote; items whose quote is not on the page are dropped, and each page's items are capped at the Stage 1 per-source budget `b = max(b_min, min(1000, B / n))`;
+4. groups the items into claims with one call and counts, in code, how many distinct cited sources state each claim;
+5. judges the most common claims against excerpts of the target pages (covered / partly / missing) and drafts additions for the gaps. "Covered" needs a quote that is found on a target page; figures in a suggestion that are not on the target page are flagged, and the prompt asks for "[add your real figure]" rather than invented numbers.
+
+Text generation only (no embeddings), on the `EVIDENCE_EXTRACTION` model: about 7 calls per query, with capped backoff on 503 and per-minute 429s, one retry for invalid JSON, and no further calls once a daily quota is exhausted. Every attempt is counted in the report's `model_calls`.
 
 ---
 
