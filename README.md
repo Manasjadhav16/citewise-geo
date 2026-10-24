@@ -354,9 +354,13 @@ For a completed Stage 1 observation, `POST /api/observation/:id/gap-analysis` st
 2. reuses page text already crawled by Stage 2 runs and crawls only what is missing (text only);
 3. extracts query-relevant evidence from each cited page as JSON items (fact, figure, definition, product_detail, comparison, claim), each with a verbatim quote; items whose quote is not on the page are dropped, and each page's items are capped at the Stage 1 per-source budget `b = max(b_min, min(1000, B / n))`;
 4. groups the items into claims with one call and counts, in code, how many distinct cited sources state each claim;
-5. judges the most common claims against excerpts of the target pages (covered / partly / missing) and drafts additions for the gaps. "Covered" needs a quote that is found on a target page; figures in a suggestion that are not on the target page are flagged, and the prompt asks for "[add your real figure]" rather than invented numbers.
+5. judges the most common claims against main-content excerpts of the target pages (covered / partly / missing) and drafts additions for the gaps.
 
-Text generation only (no embeddings), on the `EVIDENCE_EXTRACTION` model: about 7 calls per query, with capped backoff on 503 and per-minute 429s, one retry for invalid JSON, and no further calls once a daily quota is exhausted. Every attempt is counted in the report's `model_calls`.
+Checks applied after the model:
+- **Covered needs real evidence.** The target quote must be found on a target page, be at least 8 words and 40 characters, not look like a menu (separators, or a run of capitalised words with no punctuation), come from main content rather than the header/nav/footer/aside (target pages are crawled once with their sections), and not repeat across target pages. Otherwise the claim is downgraded to "partly" and flagged (`weak_covered_quote:<reason>`).
+- **Suggestions stay factual.** Promotional wording (industry-leading, best, leading, top, number one, fastest, world-class, unmatched, most trusted, seamless, …) is removed unless the target page itself uses it; figures not on the target page become "[add your real figure]"; naming a cited competitor is flagged. The original text is kept in `suggestion_original`. The prompt asks for verifiable facts only, no superlatives, no competitor claims and "[add your real figure]" in place of any number.
+
+Text generation only (no embeddings), on the `EVIDENCE_EXTRACTION` model: about 7 calls per query. Before a report starts, the worker makes one tiny call; a daily-quota 429 aborts with HTTP 429 and nothing is saved. Each call is capped at 60 seconds (timeouts are not retried) and the whole run at 10 minutes, after which no call starts and remaining queries are skipped (`deadline_reached`). 503s and per-minute 429s get capped backoff, invalid JSON one retry, and a daily-quota 429 stops further calls. Every attempt is counted in the report's `model_calls`.
 
 ---
 
