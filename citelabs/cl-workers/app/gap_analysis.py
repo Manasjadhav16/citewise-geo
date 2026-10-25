@@ -3,21 +3,28 @@ Competitive gap optimization (v1): what the sources Google's AI Overview cites
 say about a query that the target's own pages do not.
 
 For each query of a completed Stage 1 observation:
-1. Sources: the TOP_CITED most-cited non-target pages of the query's union pool
-   (by appearances, then best citation position), plus the target's own pages
-   seen in the observation and the submitted page.
+1. Sources: the most-cited non-target pages of the query's union pool (by
+   appearances, then best citation position), tried in that order until
+   TOP_CITED of them yield evidence (at most MAX_SOURCE_ATTEMPTS tried), plus the
+   target's own pages seen in the observation and the submitted page.
 2. Text: already-crawled page text where the backend has it, else a text-only
    crawl. Each cited source's evidence is capped by the Stage 1 per-source token
    budget, b = max(b_min, min(cap, B / n)), with n = cited + target pages.
 3. Evidence: one text-generation call per cited source returns structured items
    (fact, figure, definition, product_detail, comparison, claim), each with a
    verbatim quote. Items whose quote is not found in the page are dropped.
-4. Claims: one call groups the items into claims; the code (not the model)
-   counts the distinct sources behind each claim and ranks them.
-5. Coverage: one call judges the most common claims against excerpts of the
+4. Topics: the model gives every item a short topic label, in small batches, and
+   returns only item-id -> topic-id mappings. The code counts the DISTINCT
+   sources behind each topic and ranks them. If two or more sources have items
+   but every topic has one source, the labelling is retried once on the next
+   model of the pool, then done locally (content-word overlap); if it still
+   degenerates, the query's ranking is marked "unreliable".
+5. Coverage: one call judges the most common topics against excerpts of the
    target pages (covered / partly / missing, with a target quote) and drafts a
-   content addition for each gap. A "covered" verdict needs a quote that is found
-   on a target page; suggested figures not on the target page are flagged.
+   topic-level content addition for each gap. Post-checks: a "covered" verdict
+   needs a usable target quote; promotional wording and unsourced figures are
+   rewritten; a sentence asserting a target capability, price or promotion with
+   no supporting target quote is rewritten to conditional form.
 
 Text generation only (no embedding calls). Calls go straight to the configured
 Gemini model with capped exponential backoff on 503/429, and every attempt is
@@ -39,8 +46,10 @@ from .stage2_seed import _page_key as page_key
 
 logger = logging.getLogger(__name__)
 
-GAP_VERSION = "gap_v1"
-TOP_CITED = 5
+GAP_VERSION = "gap_v2"
+TOP_CITED = 5  # productive sources (sources that yield evidence items) per query
+MAX_SOURCE_ATTEMPTS = 10  # cited sources tried per query, to find TOP_CITED productive ones
+TOPIC_BATCH_SIZE = 12  # items per topic-labelling call, so replies stay short
 MAX_JUDGED_CLAIMS = 6
 TOTAL_TOKEN_BUDGET = 20000  # B, per query (Stage 1 default)
 PER_SOURCE_TOKEN_CAP = 1000
@@ -54,13 +63,13 @@ TARGET_GROUP = "target"
 # ---------- source selection ----------
 
 def select_sources(
-    sources: Sequence[Mapping[str, Any]], sandbox_url: str, top_n: int = TOP_CITED
+    sources: Sequence[Mapping[str, Any]], sandbox_url: str, top_n: Optional[int] = TOP_CITED
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    (cited, targets) for one query. cited: the top_n non-target pages with a URL,
-    by appearances, stability, best citation position, then URL. targets: the
-    submitted page first, then the target's pages from the pool by appearances,
-    one per page.
+    (cited, targets) for one query. cited: the non-target pages with a URL, by
+    appearances, stability, best citation position, then URL (the first top_n;
+    all of them with top_n=None). targets: the submitted page first, then the
+    target's pages from the pool by appearances, one per page.
     """
     target_domain = normalize_domain(sandbox_url)
 
@@ -73,7 +82,7 @@ def select_sources(
         -(s.get("appearances") or 0), -(s.get("stability") or 0.0),
         s.get("best_position") if s.get("best_position") is not None else 10**6, s["url"],
     ))
-    cited = candidates[:top_n]
+    cited = candidates if top_n is None else candidates[:top_n]
 
     targets: List[Dict[str, Any]] = [{"url": sandbox_url, "submitted": True, "appearances": None}]
     seen = {page_key(sandbox_url)}
@@ -188,66 +197,183 @@ def parse_evidence_items(
     return items, dropped
 
 
-# ---------- claim counting ----------
+# ---------- topics ----------
 
 @dataclass
 class Claim:
+    """A topic the cited sources discuss (claim = its label), with the items and sources behind it."""
+
     claim_id: str  # "C<n>"
     claim: str
     item_ids: List[str]
     sources: List[str]  # source labels, in first-seen order
-    source_count: int
+    source_count: int  # distinct sources
     weight: int  # summed appearances of the supporting sources (tie-break)
     quotes: List[Dict[str, str]] = field(default_factory=list)
+    texts: List[str] = field(default_factory=list)  # the items' evidence sentences
 
 
-def count_claims(
-    raw_claims: Any,
-    items: Sequence[EvidenceItem],
-    appearances: Mapping[str, int],
-) -> List[Claim]:
+def normalize_label(label: str) -> str:
+    return " ".join(normalize_for_match(label).split())
+
+
+def build_claims(groups: Sequence[Tuple[str, Sequence[str]]], items: Sequence[EvidenceItem],
+                 appearances: Mapping[str, int]) -> List[Claim]:
     """
-    Claims from the grouping reply, counted by the code. Unknown item ids are
-    ignored, an item belongs to the first claim that lists it, items no claim
-    lists become single-item claims (their own text), and a claim's count is the
-    number of distinct sources behind its items. Ranked by source count, then the
-    sources' summed appearances, then first appearance.
+    Claims from (label, item ids) groups, counted by the code: a group's count is
+    the number of DISTINCT sources behind its items. Ranked by that count, then
+    the sources' summed appearances, then first appearance.
     """
     by_id = {i.item_id: i for i in items}
-    taken: set = set()
-    groups: List[Tuple[str, List[str]]] = []
-    entries, _ = reply_entries(raw_claims, "claims")
-    for entry in entries:
-        if not isinstance(entry, Mapping):
-            continue
-        text = str(entry.get("claim") or "").strip()
-        ids = [str(i).strip() for i in entry.get("item_ids") or [] if str(i).strip() in by_id]
-        ids = [i for i in dict.fromkeys(ids) if i not in taken]
-        if not text or not ids:
-            continue
-        taken.update(ids)
-        groups.append((text, ids))
-    for item in items:  # nothing the model left out is lost
-        if item.item_id not in taken:
-            groups.append((item.text, [item.item_id]))
-
     claims = []
-    for order, (text, ids) in enumerate(groups):
+    for order, (label, ids) in enumerate(groups):
+        ids = [i for i in ids if i in by_id]
+        if not ids:
+            continue
         sources = list(dict.fromkeys(by_id[i].source_label for i in ids))
         claims.append((order, Claim(
-            claim_id="",
-            claim=text,
-            item_ids=ids,
-            sources=sources,
-            source_count=len(sources),
+            claim_id="", claim=label, item_ids=list(ids), sources=sources, source_count=len(sources),
             weight=sum(appearances.get(s, 0) for s in sources),
             quotes=[{"source": by_id[i].source_label, "quote": by_id[i].quote} for i in ids],
+            texts=[by_id[i].text for i in ids],
         )))
     claims.sort(key=lambda pair: (-pair[1].source_count, -pair[1].weight, pair[0]))
     ranked = [c for _, c in claims]
     for n, claim in enumerate(ranked, start=1):
         claim.claim_id = f"C{n}"
     return ranked
+
+
+class TopicBook:
+    """
+    Topics collected over the labelling batches. Model topic ids are only
+    trusted with a label; topics whose normalized labels match are merged, and
+    an item belongs to the first topic it is assigned to.
+    """
+
+    def __init__(self):
+        self.labels: Dict[str, str] = {}  # topic id -> label
+        self.alias: Dict[str, str] = {}  # model topic id -> canonical topic id
+        self.by_label: Dict[str, str] = {}  # normalized label -> canonical topic id
+        self.assignment: Dict[str, str] = {}  # item id -> canonical topic id
+
+    def known(self) -> List[Tuple[str, str]]:
+        return list(self.labels.items())
+
+    def add_reply(self, reply: Any, batch: Sequence[EvidenceItem]) -> int:
+        """Merge one batch reply; returns how many of the batch's items it assigned."""
+        topics, _ = reply_entries(reply, "topics")
+        for entry in topics:
+            if not isinstance(entry, Mapping):
+                continue
+            topic_id = str(entry.get("topic_id") or "").strip()
+            label = str(entry.get("label") or "").strip()
+            key = normalize_label(label)
+            if not topic_id or not key:
+                continue
+            if topic_id in self.alias:
+                continue  # an existing id keeps its first label
+            canonical = self.by_label.get(key)
+            if canonical is None:
+                canonical = topic_id if topic_id not in self.labels else f"{topic_id}_{len(self.labels) + 1}"
+                self.labels[canonical] = label
+                self.by_label[key] = canonical
+            self.alias[topic_id] = canonical
+        for topic_id in list(self.labels):  # ids carried over from earlier batches
+            self.alias.setdefault(topic_id, topic_id)
+
+        in_batch = {i.item_id for i in batch}
+        assigned = 0
+        assignments, _ = reply_entries(reply, "assignments")
+        for entry in assignments:
+            if not isinstance(entry, Mapping):
+                continue
+            item_id = str(entry.get("item_id") or "").strip()
+            topic = self.alias.get(str(entry.get("topic_id") or "").strip())
+            if item_id in in_batch and topic and item_id not in self.assignment:
+                self.assignment[item_id] = topic
+                assigned += 1
+        return assigned
+
+    def groups(self, items: Sequence[EvidenceItem]) -> List[Tuple[str, List[str]]]:
+        """(label, item ids) per topic in first-assignment order; unassigned items are their own topics."""
+        members: Dict[str, List[str]] = {}
+        for item in items:
+            topic = self.assignment.get(item.item_id)
+            if topic:
+                members.setdefault(topic, []).append(item.item_id)
+        groups = [(self.labels[t], ids) for t, ids in members.items()]
+        groups += [(item.text, [item.item_id]) for item in items if item.item_id not in self.assignment]
+        return groups
+
+
+def sources_with_items(items: Sequence[EvidenceItem]) -> int:
+    return len({i.source_label for i in items})
+
+
+def is_degenerate(claims: Sequence[Claim], items: Sequence[EvidenceItem]) -> bool:
+    """Two or more sources gave evidence, yet no topic is shared by two sources."""
+    return sources_with_items(items) >= 2 and all(c.source_count <= 1 for c in claims)
+
+
+# Words too common in this domain to say two items share a topic
+_TOPIC_STOPWORDS = {"payment", "payments", "gateway", "gateways", "india", "indian", "offers", "offer", "provides",
+                    "provide", "supports", "support", "platform", "business", "businesses", "merchants", "merchant",
+                    "service", "services", "also", "such", "like", "including", "available", "users", "online"}
+
+
+def _topic_terms(text: str) -> set:
+    return {t for t in _terms(text) if t not in _TOPIC_STOPWORDS and not t.isdigit()}
+
+
+def local_topic_groups(items: Sequence[EvidenceItem], min_shared: int = 2, min_jaccard: float = 0.2
+                       ) -> List[Tuple[str, List[str]]]:
+    """
+    Topics without a model: items from DIFFERENT sources whose content words
+    overlap are linked (at least min_shared shared words and Jaccard >=
+    min_jaccard; for very short items, of at most 3 content words, one shared
+    word with Jaccard >= 0.25), and linked items form one topic. Items of the
+    same source are never linked directly: that adds nothing to a distinct-
+    source count and would chain unrelated items through a brand name. The label
+    is the topic's most frequent shared words.
+    """
+    terms = [_topic_terms(i.text) for i in items]
+    parent = list(range(len(items)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a in range(len(items)):
+        for b in range(a + 1, len(items)):
+            if items[a].source_label == items[b].source_label:
+                continue
+            shared = terms[a] & terms[b]
+            union = terms[a] | terms[b]
+            if not union:
+                continue
+            jaccard = len(shared) / len(union)
+            short = min(len(terms[a]), len(terms[b])) <= 3
+            if (len(shared) >= min_shared and jaccard >= min_jaccard) or (short and len(shared) == 1 and jaccard >= 0.25):
+                parent[find(a)] = find(b)
+    members: Dict[int, List[int]] = {}
+    for index in range(len(items)):
+        members.setdefault(find(index), []).append(index)
+    groups = []
+    for indexes in sorted(members.values(), key=lambda m: m[0]):
+        ids = [items[i].item_id for i in indexes]
+        if len(indexes) == 1:
+            groups.append((items[indexes[0]].text, ids))
+            continue
+        counts: Dict[str, int] = {}
+        for i in indexes:
+            for t in terms[i]:
+                counts[t] = counts.get(t, 0) + 1
+        shared_words = [t for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) if n > 1][:3]
+        groups.append((" ".join(shared_words) or items[indexes[0]].text, ids))
+    return groups
 
 
 # ---------- target excerpts ----------
@@ -287,6 +413,8 @@ def select_excerpt(page_text: str, query: str, claims: Sequence[Claim], token_bu
     wanted = _terms(query)
     for claim in claims:
         wanted |= _terms(claim.claim)
+        for text in claim.texts:
+            wanted |= _terms(text)
     scored = []
     for index, passage in enumerate(split_passages(page_text)):
         overlap = len(_terms(passage) & wanted)
@@ -405,6 +533,66 @@ def check_suggestion(
     return text, flags
 
 
+# ---------- target capability claims ----------
+
+_CONDITIONAL = re.compile(r"\b(if|whether|only if|in case|where applicable|if applicable|if any)\b", re.IGNORECASE)
+_CAPABILITY_VERBS = (r"offers?|provides?|supports?|includes?|has|have|charges?|gives?|enables?|allows?|lets|features|"
+                     r"accepts?|settles?|processes|guarantees?|delivers?|waives?")
+_ASSERTING_FRAME = re.compile(
+    r"\b(?:stating|specifying|clarifying|confirming|showing|noting|explaining|saying|state|specify|confirm)\s+that\b"
+    r"|\b(?:details|information|text|copy)\s+that\b", re.IGNORECASE)
+_PROMOTION = re.compile(r"\b(?:zero|free|no\s+(?:setup\s+|platform\s+|annual\s+)?fees?|discount\w*|cashback|"
+                        r"promotional|promotion|festive\s+offer|waiver|waived)\b|\b0\s?%", re.IGNORECASE)
+_POSSESSIVE = re.compile(r"\b(?:its|their)\s+(?:[\w-]+\s+){0,3}(?:capabilit(?:y|ies)|features?|tools?|offers?|"
+                         r"support|integrations?|plans?|pricing|rates?|fees?)\b", re.IGNORECASE)
+_SUGGESTION_WORDS = {"add", "section", "page", "real", "figure", "figures", "state", "details", "detail", "include",
+                     "should", "could", "information", "explicitly", "clarify", "publish", "specific", "specifying",
+                     "stating", "list", "outline"}
+
+
+def split_sentences(text: str) -> List[str]:
+    return [p.strip() for p in re.split(r"(?<=[.!?])\s+(?=[A-Z\[])", (text or "").strip()) if p.strip()]
+
+
+def asserts_target_capability(sentence: str, brand: str) -> bool:
+    """
+    True when the sentence presents a capability, price or promotion of the
+    target as fact ("Razorpay offers ...", "add details stating that it supports
+    ...", "its fraud-detection features", a zero-fee offer), rather than asking
+    the brand to state its own real details. Conditional sentences never count.
+    """
+    if _CONDITIONAL.search(sentence):
+        return False
+    names = r"(?:" + re.escape(brand) + r"|it|they)" if brand else r"(?:it|they)"
+    direct = re.search(r"\b" + names + r"\s+(?:also\s+|now\s+|already\s+)?(?:" + _CAPABILITY_VERBS + r")\b",
+                       sentence, re.IGNORECASE)
+    framed = _ASSERTING_FRAME.search(sentence) and (
+        re.search(r"\b(?:" + _CAPABILITY_VERBS + r"|can\s+(?:get|receive|use|accept|enjoy)|receive|is|are)\b", sentence, re.IGNORECASE))
+    return bool(direct or framed or _PROMOTION.search(sentence) or _POSSESSIVE.search(sentence))
+
+
+def check_target_claims(suggestion: str, brand: str, supporting_quote: Optional[str]) -> Tuple[str, List[str]]:
+    """
+    Sentences that assert a target capability are kept only when the verified
+    target quote supports them (at least two shared content words beyond the
+    brand name and suggestion boilerplate); otherwise they are rewritten to
+    conditional form ("If <brand> offers this, ...") and flagged
+    unsupported_target_claim.
+    """
+    brand_terms = _terms(brand)
+    quote_terms = _terms(supporting_quote or "") - brand_terms
+    out, rewritten = [], 0
+    for sentence in split_sentences(suggestion):
+        if asserts_target_capability(sentence, brand):
+            shared = (_terms(sentence) - brand_terms - _SUGGESTION_WORDS) & quote_terms
+            if len(shared) < 2:
+                lead = sentence if (brand and sentence.lower().startswith(brand.lower())) else sentence[:1].lower() + sentence[1:]
+                sentence = f"If {brand or 'the brand'} offers this, {lead}"
+                rewritten += 1
+        out.append(sentence)
+    return " ".join(out), (["unsupported_target_claim"] if rewritten else [])
+
+
 # ---------- quote quality ----------
 
 MIN_QUOTE_WORDS = 8
@@ -445,13 +633,16 @@ def apply_judgements(
     target_texts: Mapping[str, Union[str, PageText]],
     source_urls: Mapping[str, str],
     competitor_names: Sequence[str] = (),
+    brand: str = "",
 ) -> List[Dict[str, Any]]:
     """
-    Gap rows for the judged claims. A status the model did not give becomes
+    Gap rows for the judged topics. A status the model did not give becomes
     missing. "covered" needs a quote found on a target page that passes
     quote_quality (main content, long enough, not menu or site-wide text); a
     weak or unverified quote downgrades it to "partly", flagged. Suggestions are
-    kept only for missing/partly claims and go through check_suggestion.
+    kept only for missing/partly topics and go through check_target_claims
+    (unsupported capability claims become conditional) and check_suggestion
+    (promotional wording, unsourced figures, competitor names).
     target_texts: target URL -> text (or PageText with sections).
     """
     verdicts = {}
@@ -494,13 +685,17 @@ def apply_judgements(
         suggestion = original = None
         if status in ("missing", "partly"):
             original = str(verdict.get("suggestion") or "").strip() or (
-                f"Add a section that addresses: {claim.claim} Use your own verified details; add your real figures."
+                f"Add a section on {claim.claim} and state your real figures."
             )
-            suggestion, suggestion_flags = check_suggestion(original, all_target_text, competitor_names)
-            flags.extend(suggestion_flags)
+            supported_by = quote if quality is None else None
+            suggestion, claim_flags = check_target_claims(original, brand, supported_by)
+            suggestion, suggestion_flags = check_suggestion(suggestion, all_target_text, competitor_names)
+            flags.extend(claim_flags + suggestion_flags)
         rows.append({
             "claim_id": claim.claim_id,
             "claim": claim.claim,
+            "topic": claim.claim,
+            "source_statements": claim.texts,
             "source_count": claim.source_count,
             "sources": [source_urls.get(s, s) for s in claim.sources],
             "source_labels": claim.sources,
@@ -541,43 +736,54 @@ def build_extraction_prompt(query: str, url: str, title: Optional[str], page_tex
     )
 
 
-def build_cluster_prompt(query: str, items: Sequence[EvidenceItem]) -> str:
+def build_topic_prompt(query: str, items: Sequence[EvidenceItem], known_topics: Sequence[Tuple[str, str]]) -> str:
+    known = "\n".join(f"{tid}: {label}" for tid, label in known_topics) or "(none yet)"
     lines = "\n".join(f"{i.item_id} [{i.type}] {i.text}" for i in items)
     return (
         f"Query: {query}\n\n"
-        "Below are evidence items extracted from several cited sources. Item ids start with the source label "
-        "(S1, S2, ...). Group items that state the same claim (the same fact, figure, definition, product detail "
-        "or comparison), even when worded differently. Items that disagree on a figure are different claims.\n"
-        "Return JSON: {\"claims\": [{\"claim\": \"one neutral sentence stating the shared claim\", "
-        "\"item_ids\": [\"S1.2\", \"S3.1\"]}]}\n"
-        "Use every item exactly once. Do not count sources yourself and do not add anything the items do not say.\n\n"
-        f"ITEMS:\n{lines}"
+        "Below are evidence items from several cited sources (item ids start with the source label S1, S2, ...). "
+        "Give every item a TOPIC: what the item is about, not what it claims. Use a short, normalized, "
+        "brand-neutral label of 2-5 words, such as \"UPI MDR fee\", \"credit card MDR\", \"payment methods supported\", "
+        "\"settlement time\" or \"setup fee\". Items about the same topic from different sources (and different "
+        "brands) must get the SAME topic, even when their figures differ.\n"
+        "Reuse an existing topic id when it fits; create a new topic only when none fits.\n"
+        "Return JSON only with ids, never rewritten claims:\n"
+        '{"topics": [{"topic_id": "K7", "label": "new topic label"}], '
+        '"assignments": [{"item_id": "S1.2", "topic_id": "K3"}]}\n'
+        "List in topics only NEW topics (ids K1, K2, ... not used yet). Assign every item below exactly once.\n\n"
+        f"EXISTING TOPICS:\n{known}\n\nITEMS:\n{lines}"
     )
 
 
 def build_judge_prompt(query: str, brand: str, claims: Sequence[Claim], excerpts: Sequence[Dict[str, str]]) -> str:
-    claim_lines = "\n".join(f"{c.claim_id} (stated by {c.source_count} cited sources): {c.claim}" for c in claims)
+    claim_lines = "\n".join(
+        f"{c.claim_id} topic: {c.claim} (discussed by {c.source_count} cited sources)\n"
+        + "\n".join(f"   - {q['source']}: {t}" for q, t in list(zip(c.quotes, c.texts))[:3])
+        for c in claims
+    )
     page_blocks = "\n\n".join(f"[{e['label']}] {e['url']}\n{e['excerpt'] or '(no relevant passage found)'}" for e in excerpts)
     return (
         f"Query: {query}\nTarget brand: {brand}\n\n"
-        "The claims below are made by sources Google's AI Overview cited for this query. For each claim, judge "
-        f"whether {brand}'s own pages (excerpts below) cover it:\n"
-        "- covered: the target pages clearly state it (or the brand's own equivalent of it)\n"
-        "- partly: the target pages touch on it but leave out the specific fact, figure or detail\n"
-        "- missing: the target pages do not address it\n"
+        "The topics below are discussed by sources Google's AI Overview cited for this query (with what the "
+        f"sources say). For each topic, judge whether {brand}'s own pages (excerpts below) cover it:\n"
+        f"- covered: the target pages clearly state {brand}'s own information on this topic\n"
+        "- partly: the target pages touch on the topic but leave out the specific facts or figures\n"
+        "- missing: the target pages do not address the topic\n"
         "For covered or partly, give target_quote: a short verbatim excerpt (5-30 words) copied exactly from the "
         "target excerpts. For missing, target_quote is null.\n"
         "A quote from navigation, menus, headers or footers does not show coverage: quote a full sentence from the "
         "page's main content, or choose partly or missing.\n"
-        f"For partly or missing, give suggestion: one or two sentences on what {brand} could add to its page to "
-        "address the claim. The suggestion must state only verifiable facts about the brand's own offering: "
-        "no superlatives or promotional wording (such as best, leading, industry-leading, top, fastest, number one, "
-        "world-class, unmatched, most trusted, seamless), no claims about competitors, and no invented statistics, "
-        "prices, dates, reviews or awards. Never present a competitor's figure as the brand's. Write "
+        "For partly or missing, give suggestion: a topic-level content addition, in the form \"Add a section on "
+        "<topic> and state your real figures\", optionally naming what such a section should cover. Never state "
+        f"that {brand} offers a feature, price or promotion, and never copy a competitor-specific offer, price or "
+        f"plan. When a capability matters, use conditional wording: \"If {brand} offers ..., state ...\". "
+        "State only verifiable facts: no superlatives or promotional wording (such as best, leading, "
+        "industry-leading, top, fastest, number one, world-class, unmatched, most trusted, seamless), no claims "
+        "about competitors, and no invented statistics, prices, dates, reviews or awards. Write "
         "\"[add your real figure]\" in place of any number. For covered, suggestion is null.\n"
         'Return JSON: {"judgements": [{"claim_id": "C1", "status": "covered|partly|missing", '
         '"target_quote": "..." or null, "suggestion": "..." or null}]}\n\n'
-        f"CLAIMS:\n{claim_lines}\n\nTARGET PAGE EXCERPTS:\n{page_blocks}"
+        f"TOPICS:\n{claim_lines}\n\nTARGET PAGE EXCERPTS:\n{page_blocks}"
     )
 
 
@@ -627,7 +833,7 @@ def _is_daily_quota(error: Exception) -> bool:
 # Output-token ceilings: thinking models spend part of max_output_tokens before
 # answering, and a cut-off reply is invalid JSON
 EXTRACT_MAX_TOKENS = 8192
-CLUSTER_MAX_TOKENS = 16384
+CLUSTER_MAX_TOKENS = 4096  # one topic batch: ids only
 JUDGE_MAX_TOKENS = 16384
 
 
@@ -645,7 +851,7 @@ class GeminiJSONModel:
     """
 
     def __init__(self, model_name: Optional[str] = None, max_retries: int = 3, base_delay: float = 4.0,
-                 max_attempts: int = 40, json_retries: int = 1, call_timeout: float = 60.0,
+                 max_attempts: int = 60, json_retries: int = 1, call_timeout: float = 60.0,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
         from .constants import get_model_for_role
         from .llm_providers.factory import get_llm_provider
@@ -666,6 +872,10 @@ class GeminiJSONModel:
         index = self.model_pool.index(self.model_name) if self.model_name in self.model_pool else -1
         self.model_name = self.model_pool[(index + 1) % len(self.model_pool)]
         return self.model_name
+
+    def fall_back(self) -> str:
+        """Public: move later calls to the next model of the pool (e.g. after a degenerate topic grouping)."""
+        return self._fall_back()
 
     def set_time_limit(self, seconds: float) -> None:
         self.deadline = time.monotonic() + seconds
@@ -856,17 +1066,73 @@ class TextStore:
         return PageText(text, main, chrome), origin + ("+sections" if main is not None else ""), None
 
 
+async def label_topics(model, query: str, items: Sequence[EvidenceItem]) -> Tuple[List[Tuple[str, List[str]]], Dict[str, Any]]:
+    """Topic groups from the model, TOPIC_BATCH_SIZE items per call, topics carried across batches."""
+    book = TopicBook()
+    info = {"batches": 0, "assigned": 0, "errors": []}
+    for start in range(0, len(items), TOPIC_BATCH_SIZE):
+        batch = items[start:start + TOPIC_BATCH_SIZE]
+        info["batches"] += 1
+        try:
+            reply = await model.generate_json("topics", build_topic_prompt(query, batch, book.known()),
+                                              max_tokens=CLUSTER_MAX_TOKENS)
+        except Exception as exc:
+            info["errors"].append(f"batch {info['batches']}: {str(exc)[:200]}")
+            continue
+        info["assigned"] += book.add_reply(reply, batch)
+    return book.groups(items), info
+
+
+async def cluster_topics(model, query: str, items: Sequence[EvidenceItem], appearances: Mapping[str, int]
+                         ) -> Tuple[List[Claim], Dict[str, Any]]:
+    """
+    Topics for the query's items: model labelling; if degenerate (2+ sources
+    with items but no topic shared by two sources), once more on the next model
+    of the pool; then local content-word clustering. ranking is "ok",
+    "single_source" (only one source had items) or "unreliable".
+    """
+    clustering: Dict[str, Any] = {"attempts": []}
+    claims: List[Claim] = []
+    for attempt in range(2):
+        model_name = getattr(model, "model_name", None)
+        groups, info = await label_topics(model, query, items)
+        claims = build_claims(groups, items, appearances)
+        degenerate = is_degenerate(claims, items)
+        clustering["attempts"].append({"method": "model", "model": model_name, **info, "degenerate": degenerate})
+        if not degenerate:
+            clustering["method"] = "model" if attempt == 0 else "model_retry"
+            break
+        if attempt == 0 and hasattr(model, "fall_back"):
+            model.fall_back()
+        elif attempt == 0:
+            break
+    else:
+        claims = []
+    if not claims or is_degenerate(claims, items):
+        claims = build_claims(local_topic_groups(items), items, appearances)
+        clustering["method"] = "local"
+        clustering["attempts"].append({"method": "local", "degenerate": is_degenerate(claims, items)})
+    if sources_with_items(items) < 2:
+        clustering["ranking"] = "single_source"
+    else:
+        clustering["ranking"] = "unreliable" if is_degenerate(claims, items) else "ok"
+    clustering["topics"] = len(claims)
+    clustering["shared_topics"] = sum(1 for c in claims if c.source_count >= 2)
+    return claims, clustering
+
+
 async def analyze_query(
     query: Mapping[str, Any], sandbox_url: str, brand: str, store: TextStore, model, extraction_concurrency: int = 3
 ) -> Dict[str, Any]:
-    cited, targets = select_sources(query.get("sources") or [], sandbox_url)
-    budget = source_token_budget(len(cited) + len(targets))
+    candidates, targets = select_sources(query.get("sources") or [], sandbox_url, top_n=None)
+    budget = source_token_budget(min(TOP_CITED, len(candidates)) + len(targets))
     result: Dict[str, Any] = {
         "query_index": query.get("query_index"),
         "query": query["query"],
         "per_source_token_budget": budget,
         "sources": [],
         "target_pages": [],
+        "clustering": None,
         "gaps": [],
         "other_claims": [],
         "errors": [],
@@ -880,6 +1146,7 @@ async def analyze_query(
             "label": label, "url": source["url"], "domain": source.get("domain"), "category": source.get("category"),
             "appearances": source.get("appearances"), "best_position": source.get("best_position"),
             "text_source": origin, "error": crawl_error, "items": 0, "dropped": None, "reply_shape": None,
+            "productive": False,
         }
         if text is None:
             return [], row
@@ -893,12 +1160,22 @@ async def analyze_query(
             row["error"] = f"extraction failed: {str(exc)[:200]}"
             return [], row
         items, dropped = parse_evidence_items(reply, label, text, budget)
-        row.update(items=len(items), dropped=dropped, reply_shape=reply_entries(reply, "items")[1])
+        row.update(items=len(items), dropped=dropped, reply_shape=reply_entries(reply, "items")[1], productive=bool(items))
         return items, row
 
-    extracted = await asyncio.gather(*(extract(f"S{n}", s) for n, s in enumerate(cited, start=1)))
-    items = [i for its, _ in extracted for i in its]
-    result["sources"] = [row for _, row in extracted]
+    # Most-cited first; a source that yields no items is skipped for the next one,
+    # until TOP_CITED productive sources or MAX_SOURCE_ATTEMPTS sources tried
+    items: List[EvidenceItem] = []
+    tried = productive = 0
+    while productive < TOP_CITED and tried < min(MAX_SOURCE_ATTEMPTS, len(candidates)):
+        wave = candidates[tried:min(tried + TOP_CITED - productive, MAX_SOURCE_ATTEMPTS)]
+        outcomes = await asyncio.gather(*(extract(f"S{tried + n}", s) for n, s in enumerate(wave, start=1)))
+        tried += len(wave)
+        for wave_items, row in outcomes:
+            result["sources"].append(row)
+            items.extend(wave_items)
+            productive += bool(wave_items)
+    result["source_attempts"] = {"tried": tried, "productive": productive, "candidates": len(candidates)}
     source_urls = {row["label"]: row["url"] for row in result["sources"]}
     appearances = {row["label"]: row["appearances"] or 0 for row in result["sources"]}
 
@@ -911,17 +1188,12 @@ async def analyze_query(
         })
         if page:
             target_texts[target["url"]] = page
-    competitor_names = cited_brand_names(cited, brand)
+    competitor_names = cited_brand_names(candidates[:tried], brand)
 
     if not items:
         result["errors"].append("no verified evidence from the cited sources")
         return result
-    try:
-        grouped = await model.generate_json("cluster", build_cluster_prompt(query["query"], items), max_tokens=CLUSTER_MAX_TOKENS)
-    except Exception as exc:
-        result["errors"].append(f"claim grouping failed, items counted one by one: {str(exc)[:200]}")
-        grouped = {}
-    claims = count_claims(grouped, items, appearances)
+    claims, result["clustering"] = await cluster_topics(model, query["query"], items, appearances)
     judged, rest = claims[:MAX_JUDGED_CLAIMS], claims[MAX_JUDGED_CLAIMS:]
     result["other_claims"] = [
         {"claim": c.claim, "source_count": c.source_count, "sources": [source_urls[s] for s in c.sources]} for c in rest
@@ -929,7 +1201,7 @@ async def analyze_query(
 
     if not target_texts:
         result["errors"].append("no target page text; coverage not judged")
-        rows = apply_judgements(judged, {}, {}, source_urls, competitor_names)
+        rows = apply_judgements(judged, {}, {}, source_urls, competitor_names, brand)
         for row in rows:
             row["flags"].append("target_text_unavailable")
         result["gaps"] = rank_gaps(rows)
@@ -948,7 +1220,7 @@ async def analyze_query(
     except Exception as exc:
         result["errors"].append(f"coverage judgement failed: {str(exc)[:200]}")
         verdicts = {}
-    result["gaps"] = rank_gaps(apply_judgements(judged, verdicts, target_texts, source_urls, competitor_names))
+    result["gaps"] = rank_gaps(apply_judgements(judged, verdicts, target_texts, source_urls, competitor_names, brand))
     return result
 
 
@@ -993,7 +1265,7 @@ async def run_gap_analysis(
         if time.monotonic() - started >= time_limit:
             deadline_reached = True
             queries.append({"query_index": query.get("query_index"), "query": query["query"], "sources": [],
-                            "target_pages": [], "gaps": [], "other_claims": [],
+                            "target_pages": [], "clustering": None, "gaps": [], "other_claims": [],
                             "errors": [f"not analyzed: the {time_limit:.0f}-second run limit was reached"]})
             continue
         queries.append(await analyze_query(query, sandbox_url, brand, store, model))
@@ -1010,6 +1282,8 @@ async def run_gap_analysis(
         "model": getattr(model, "model_name", None),
         "settings": {
             "top_cited_sources": TOP_CITED,
+            "max_source_attempts": MAX_SOURCE_ATTEMPTS,
+            "topic_batch_size": TOPIC_BATCH_SIZE,
             "max_judged_claims": MAX_JUDGED_CLAIMS,
             "total_token_budget": TOTAL_TOKEN_BUDGET,
             "per_source_token_cap": PER_SOURCE_TOKEN_CAP,
@@ -1020,6 +1294,9 @@ async def run_gap_analysis(
             "model_pool": getattr(model, "model_pool", None),
         },
         "deadline_reached": deadline_reached,
+        # Queries whose topic ranking could not be trusted (no topic shared by two sources, even after fallbacks)
+        "ranking_unreliable_queries": [q["query_index"] for q in queries
+                                       if (q.get("clustering") or {}).get("ranking") == "unreliable"],
         "model_calls": {**summarize_calls(calls), "models_used": models_used(calls),
                         "quota_exhausted": getattr(model, "quota_exhausted", None), "calls": list(calls)},
         "seconds": round(time.monotonic() - started, 1),

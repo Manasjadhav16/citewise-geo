@@ -6,7 +6,7 @@ from app import gap_analysis as ga
 from app.gap_analysis import (
     EvidenceItem,
     apply_judgements,
-    count_claims,
+    build_claims,
     parse_evidence_items,
     parse_json_reply,
     quote_in_text,
@@ -32,6 +32,20 @@ def src(url, appearances, group="ai_visibility", category="media", stability=Non
 
 def item(item_id, text="t", quote="q"):
     return EvidenceItem(item_id, item_id.split(".")[0], "fact", text, quote)
+
+
+def topics(groups, items, appearances=None):
+    """Claims from (label, item ids) groups, as the topic step builds them."""
+    return build_claims(groups, items, appearances or {})
+
+
+def singles(items):
+    return build_claims([(i.text, [i.item_id]) for i in items], items, {})
+
+
+def topic_reply(topics_, assignments):
+    return {"topics": [{"topic_id": t, "label": l} for t, l in topics_],
+            "assignments": [{"item_id": i, "topic_id": t} for i, t in assignments]}
 
 
 class TestSelection:
@@ -91,40 +105,42 @@ class TestQuotes:
         assert len(items) == 1 and dropped["over_budget"] == 1
 
 
-class TestClaimCounting:
+class TestTopicCounting:
     ITEMS = [item("S1.1"), item("S1.2"), item("S2.1"), item("S3.1"), item("S3.2", text="Only S3 says this")]
 
+    def book(self, *replies_and_batches):
+        book = ga.TopicBook()
+        for reply, batch in replies_and_batches:
+            book.add_reply(reply, batch)
+        return book
+
     def test_counts_distinct_sources_not_items(self):
-        reply = {"claims": [
-            {"claim": "Card MDR is about 2%", "item_ids": ["S1.1", "S1.2", "S2.1"]},  # two items from S1
-            {"claim": "UPI is free", "item_ids": ["S3.1"]},
-        ]}
-        claims = count_claims(reply, self.ITEMS, {"S1": 3, "S2": 2, "S3": 1})
+        book = self.book((topic_reply([("K1", "card MDR"), ("K2", "UPI MDR fee")],
+                                      [("S1.1", "K1"), ("S1.2", "K1"), ("S2.1", "K1"), ("S3.1", "K2")]), self.ITEMS))
+        claims = build_claims(book.groups(self.ITEMS), self.ITEMS, {"S1": 3, "S2": 2, "S3": 1})
         assert [(c.claim, c.source_count, c.sources) for c in claims] == [
-            ("Card MDR is about 2%", 2, ["S1", "S2"]),
-            ("UPI is free", 1, ["S3"]),
-            ("Only S3 says this", 1, ["S3"]),  # left out by the model: kept as its own claim
+            ("card MDR", 2, ["S1", "S2"]),  # two items from S1 count once
+            ("UPI MDR fee", 1, ["S3"]),
+            ("Only S3 says this", 1, ["S3"]),  # left out by the model: kept as its own topic
         ]
         assert [c.claim_id for c in claims] == ["C1", "C2", "C3"]
 
-    def test_ignores_unknown_and_reused_ids(self):
-        reply = {"claims": [
-            {"claim": "A", "item_ids": ["S1.1", "S9.9"]},
-            {"claim": "B", "item_ids": ["S1.1", "S2.1"]},  # S1.1 already belongs to A
-            {"claim": "C", "item_ids": ["S7.1"]},  # nothing valid: dropped
-        ]}
-        claims = count_claims(reply, self.ITEMS[:3], {})
-        assert [(c.claim, c.item_ids) for c in claims if c.claim in ("A", "B")] == [("A", ["S1.1"]), ("B", ["S2.1"])]
-        assert "C" not in [c.claim for c in claims]
+    def test_ignores_unknown_ids_unlabelled_topics_and_reassignment(self):
+        book = self.book((topic_reply([("K1", "A")], [("S1.1", "K1"), ("S9.9", "K1"), ("S2.1", "K7"), ("S1.1", "K1")]),
+                          self.ITEMS[:3]))
+        groups = book.groups(self.ITEMS[:3])
+        assert groups[0] == ("A", ["S1.1"])  # K7 has no label, S9.9 is not in the batch
+        assert [g[1] for g in groups[1:]] == [["S1.2"], ["S2.1"]]
 
     def test_ties_broken_by_appearances_then_order(self):
-        reply = {"claims": [{"claim": "low", "item_ids": ["S1.1"]}, {"claim": "high", "item_ids": ["S2.1"]}]}
-        claims = count_claims(reply, [item("S1.1"), item("S2.1")], {"S1": 1, "S2": 3})
+        items = [item("S1.1"), item("S2.1")]
+        claims = topics([("low", ["S1.1"]), ("high", ["S2.1"])], items, {"S1": 1, "S2": 3})
         assert [c.claim for c in claims] == ["high", "low"]
 
-    def test_bad_reply_falls_back_to_one_claim_per_item(self):
-        claims = count_claims("not json", [item("S1.1", "x"), item("S2.1", "y")], {})
-        assert [(c.claim, c.source_count) for c in claims] == [("x", 1), ("y", 1)]
+    def test_bad_reply_falls_back_to_one_topic_per_item(self):
+        items = [item("S1.1", "x"), item("S2.1", "y")]
+        book = self.book(("not json", items))
+        assert [(c.claim, c.source_count) for c in build_claims(book.groups(items), items, {})] == [("x", 1), ("y", 1)]
 
 
 class TestJudgements:
@@ -132,11 +148,8 @@ class TestJudgements:
                                    "Settlement happens in T+2 days."}
 
     def claims(self):
-        return count_claims({"claims": [
-            {"claim": "Card MDR is 2%", "item_ids": ["S1.1", "S2.1"]},
-            {"claim": "Instant settlement is offered", "item_ids": ["S1.2"]},
-            {"claim": "UPI MDR is zero", "item_ids": ["S2.2"]},
-        ]}, [item("S1.1"), item("S1.2"), item("S2.1"), item("S2.2")], {})
+        return topics([("Card MDR is 2%", ["S1.1", "S2.1"]), ("Instant settlement is offered", ["S1.2"]),
+                       ("UPI MDR is zero", ["S2.2"])], [item("S1.1"), item("S1.2"), item("S2.1"), item("S2.2")])
 
     def test_statuses_quotes_and_flags(self):
         reply = {"judgements": [
@@ -158,7 +171,7 @@ class TestJudgements:
     def test_missing_verdict_defaults_to_missing_with_safe_suggestion(self):
         rows = apply_judgements(self.claims()[:1], {}, self.TARGET, {})
         assert rows[0]["target_status"] == "missing" and rows[0]["flags"] == ["no_verdict"]
-        assert "add your real figures" in rows[0]["suggestion"]
+        assert rows[0]["suggestion"] == "Add a section on Card MDR is 2% and state your real figures."
 
     def test_rank_puts_support_first_then_missing(self):
         rows = [
@@ -173,7 +186,7 @@ class TestJudgements:
 
     def test_excerpt_keeps_relevant_passages_within_budget_in_page_order(self):
         page = "Welcome to Acme.\nOur card MDR is 2% per payment.\nCareers at Acme.\nUPI MDR is zero for merchants."
-        claims = count_claims({}, [item("S1.1", "UPI MDR zero"), item("S2.1", "card MDR 2%")], {})
+        claims = singles([item("S1.1", "UPI MDR zero"), item("S2.1", "card MDR 2%")])
         excerpt = select_excerpt(page, "MDR for UPI and cards", claims, token_budget=100)
         assert excerpt == "Our card MDR is 2% per payment.\nUPI MDR is zero for merchants."
         # both passages match 3 terms: the tie goes to page order, and only one fits in 9 tokens
@@ -185,17 +198,31 @@ class FakeModel:
 
     model_name = "fake-model"
 
-    def __init__(self, extract_replies, cluster_reply, judge_reply):
-        self.extract_replies, self.cluster_reply, self.judge_reply = extract_replies, cluster_reply, judge_reply
-        self.calls, self.prompts = [], []
+    def __init__(self, extract_replies, topics_reply, judge_reply):
+        # topics_reply: one reply, or a list used one per topic call (the last one repeats)
+        self.extract_replies, self.topics_reply, self.judge_reply = extract_replies, topics_reply, judge_reply
+        self.calls, self.prompts, self.fallbacks = [], [], 0
+        self._topic_calls = 0
+
+    def fall_back(self):
+        self.fallbacks += 1
+        self.model_name = f"fake-model-{self.fallbacks + 1}"
+        return self.model_name
 
     async def generate_json(self, stage, prompt, max_tokens=4096):
-        self.calls.append({"stage": stage, "attempt": 1, "ok": True})
+        self.calls.append({"stage": stage, "attempt": 1, "ok": True, "model": self.model_name})
         self.prompts.append((stage, prompt))
         if stage == "extract":
             url = prompt.split("Source: ", 1)[1].split()[0]
             return self.extract_replies[url]
-        return self.cluster_reply if stage == "cluster" else self.judge_reply
+        if stage == "topics":
+            replies = self.topics_reply if isinstance(self.topics_reply, list) else [self.topics_reply]
+            reply = replies[min(self._topic_calls, len(replies) - 1)]
+            self._topic_calls += 1
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+        return self.judge_reply
 
 
 PAGES = {
@@ -225,10 +252,8 @@ class TestReport:
                 ]},
                 "https://b.com/fees": {"items": [{"type": "figure", "text": "Card MDR is 2%", "quote": "Most gateways charge 2% card MDR"}]},
             },
-            cluster_reply={"claims": [
-                {"claim": "Card MDR is about 2%", "item_ids": ["S1.1", "S2.1"]},
-                {"claim": "UPI has zero MDR", "item_ids": ["S1.2"]},
-            ]},
+            topics_reply=topic_reply([("K1", "card MDR"), ("K2", "UPI MDR")],
+                                     [("S1.1", "K1"), ("S2.1", "K1"), ("S1.2", "K2")]),
             judge_reply={"judgements": [
                 {"claim_id": "C1", "status": "covered", "target_quote": "Pricing: 2% per card payment on every standard plan", "suggestion": None},
                 {"claim_id": "C2", "status": "missing", "target_quote": None, "suggestion": "State your UPI MDR: [add your real figure]."},
@@ -248,11 +273,13 @@ class TestReport:
         report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
         assert crawled == ["https://b.com/fees", "https://dead.com/x", SANDBOX]  # cached page not re-crawled
         assert set(report) == {"version", "observation_id", "sandbox_url", "brand_name", "generated_at", "model",
-                               "settings", "model_calls", "seconds", "queries", "deadline_reached"}
+                               "settings", "model_calls", "seconds", "queries", "deadline_reached",
+                               "ranking_unreliable_queries"}
+        assert report["ranking_unreliable_queries"] == []
         assert report["deadline_reached"] is False and report["settings"]["run_time_limit_seconds"] == 600
-        assert report["version"] == "gap_v1" and report["model"] == "fake-model"
-        assert report["model_calls"]["total"] == 4  # 2 extractions (dead page skipped), 1 grouping, 1 judgement
-        assert report["model_calls"]["by_stage"] == {"extract": 2, "cluster": 1, "judge": 1}
+        assert report["version"] == "gap_v2" and report["model"] == "fake-model"
+        assert report["model_calls"]["total"] == 4  # 2 extractions (dead page skipped), 1 topic batch, 1 judgement
+        assert report["model_calls"]["by_stage"] == {"extract": 2, "topics": 1, "judge": 1}
 
         q = report["queries"][0]
         assert q["per_source_token_budget"] == 1000
@@ -263,8 +290,10 @@ class TestReport:
         assert [(t["label"], t["submitted"], t["text_source"]) for t in q["target_pages"]] == [("T1", True, "crawled")]
         gaps = q["gaps"]
         assert [(g["rank"], g["claim"], g["source_count"], g["target_status"]) for g in gaps] == [
-            (1, "Card MDR is about 2%", 2, "covered"), (2, "UPI has zero MDR", 1, "missing"),
+            (1, "card MDR", 2, "covered"), (2, "UPI MDR", 1, "missing"),
         ]
+        assert q["clustering"]["method"] == "model" and q["clustering"]["ranking"] == "ok"
+        assert q["source_attempts"] == {"tried": 3, "productive": 2, "candidates": 3}
         assert gaps[0]["sources"] == ["https://a.com/fees", "https://b.com/fees"]
         assert gaps[0]["target_quote"] == "Pricing: 2% per card payment on every standard plan" and gaps[0]["suggestion"] is None
         assert gaps[1]["suggestion"] == "State your UPI MDR: [add your real figure]." and gaps[1]["flags"] == []
@@ -387,7 +416,7 @@ class TestSuggestionHonesty:
         assert flags == ["suggestion_figures_not_on_target_page:1.9", "mentions_cited_competitor:cashfree"]
 
     def test_superlative_in_a_judged_suggestion(self):
-        claims = count_claims({}, [item("S1.1", "Instant settlements")], {})
+        claims = singles([item("S1.1", "Instant settlements")])
         rows = apply_judgements(claims, {"judgements": [{"claim_id": "C1", "status": "missing",
                                 "suggestion": "Highlight Acme's world-class, unmatched instant settlements."}]},
                                 {"https://acme.in": "Acme accepts cards and UPI from customers across India."}, {})
@@ -396,7 +425,7 @@ class TestSuggestionHonesty:
         assert "promotional_wording_removed:world-class,unmatched" in rows[0]["flags"]
 
     def test_prompt_states_the_honesty_rules(self):
-        claims = count_claims({}, [item("S1.1", "x")], {})
+        claims = singles([item("S1.1", "x")])
         prompt = ga.build_judge_prompt("q", "Acme", claims, [{"label": "T1", "url": "u", "excerpt": "e"}])
         assert "only verifiable facts" in prompt and "no superlatives" in prompt
         assert "no claims about competitors" in prompt and "[add your real figure]\" in place of any number" in prompt
@@ -419,7 +448,7 @@ class TestWeakCoveredQuotes:
         assert ga.quote_quality(MAIN, ga.PageText(MAIN), other_pages=["Intro. " + MAIN]) == "repeated_on_other_target_pages"
 
     def test_navigation_quote_downgrades_covered_to_partly(self):
-        claims = count_claims({}, [item("S1.1", "Razorpay serves startups and enterprises")], {})
+        claims = singles([item("S1.1", "Razorpay serves startups and enterprises")])
         reply = {"judgements": [{"claim_id": "C1", "status": "covered", "target_quote": NAV[:90]}]}
         rows = apply_judgements(claims, reply, {"https://razorpay.com/pg": ga.PageText(NAV + " " + MAIN, MAIN, NAV)}, {})
         assert rows[0]["target_status"] == "partly"
@@ -468,24 +497,23 @@ class TestModelReplyShapes:
         s1 = report["queries"][0]["sources"][0]
         assert (s1["items"], s1["reply_shape"]) == (1, "list")
 
-    def test_truncated_grouping_reply_falls_back_to_item_claims(self):
+    def test_truncated_topic_reply_falls_back_to_local_topics(self):
         model = TestReport().model()
-
-        async def broken_cluster(stage, prompt, max_tokens=4096, _original=model.generate_json):
-            if stage == "cluster":
-                model.calls.append({"stage": stage, "attempt": 1, "ok": False})
-                return ga.parse_json_reply('{"claims": [{"claim": "Card MDR is about 2%", "item_ids": ["S1.1"')
-            return await _original(stage, prompt, max_tokens)
-
-        model.generate_json = broken_cluster
+        truncated = '{"topics": [{"topic_id": "K1", "label": "card MDR"}], "assignments": [{"item_id": "S1.1"'
+        try:
+            ga.parse_json_reply(truncated)
+        except ValueError as exc:
+            model.topics_reply = exc  # every topic call fails like a cut-off reply
 
         async def crawler(url):
             return {"full_content": PAGES.get(url, "")}
 
         report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
         q = report["queries"][0]
-        assert q["errors"][0].startswith("claim grouping failed, items counted one by one")
-        assert [g["source_count"] for g in q["gaps"]] == [1, 1, 1]
+        assert [a["method"] for a in q["clustering"]["attempts"]] == ["model", "model", "local"]
+        assert all(a.get("errors") for a in q["clustering"]["attempts"][:2])
+        assert q["clustering"]["method"] == "local" and q["clustering"]["ranking"] == "ok"
+        assert [g["source_count"] for g in q["gaps"]] == [2, 1]  # the two card-MDR items share content words
 
 
 class TestPreflightAndLimits(TestModelRetries):
@@ -625,3 +653,182 @@ class TestModelFallback(TestModelRetries):
 
 async def _page(url):
     return {"full_content": PAGES.get(url, "")}
+
+
+# ---------- topics, degenerate grouping, capability claims, source skipping ----------
+
+TOPIC_ITEMS = [
+    item("S1.1", "Paytm charges 0% MDR on UPI payments"), item("S1.2", "Paytm supports 100+ payment methods"),
+    item("S2.1", "Cashfree UPI MDR is zero for merchants"), item("S2.2", "Cashfree accepts 180+ payment methods"),
+    item("S3.1", "PayU settles funds in T+2 days"),
+]
+
+
+class TestTopicMerging:
+    def test_topics_merge_across_sources_and_batches(self, monkeypatch):
+        monkeypatch.setattr(ga, "TOPIC_BATCH_SIZE", 2)  # three batches; topics carry over
+        replies = [
+            topic_reply([("K1", "UPI MDR fee"), ("K2", "payment methods supported")], [("S1.1", "K1"), ("S1.2", "K2")]),
+            # a new id with an existing label merges into it; K1 is reused by id
+            topic_reply([("K3", "Payment methods supported")], [("S2.1", "K1"), ("S2.2", "K3")]),
+            topic_reply([("K4", "settlement time")], [("S3.1", "K4")]),
+        ]
+        model = FakeModel({}, replies, {})
+        claims, clustering = run(ga.cluster_topics(model, "q", TOPIC_ITEMS, {"S1": 3, "S2": 2, "S3": 1}))
+        assert [(c.claim, c.source_count, c.sources) for c in claims] == [
+            ("UPI MDR fee", 2, ["S1", "S2"]), ("payment methods supported", 2, ["S1", "S2"]), ("settlement time", 1, ["S3"]),
+        ]
+        assert clustering["method"] == "model" and clustering["ranking"] == "ok"
+        assert clustering["attempts"][0]["batches"] == 3 and clustering["shared_topics"] == 2
+        known_in_last_prompt = model.prompts[-1][1].split("EXISTING TOPICS:")[1]
+        assert "K1: UPI MDR fee" in known_in_last_prompt and "K3" not in known_in_last_prompt
+
+    def test_topic_prompt_asks_for_ids_only(self):
+        prompt = ga.build_topic_prompt("q", TOPIC_ITEMS[:2], [("K1", "UPI MDR fee")])
+        assert '"assignments"' in prompt and "never rewritten claims" in prompt and "K1: UPI MDR fee" in prompt
+
+
+class TestDegenerateGrouping:
+    ONE_PER_ITEM = topic_reply([(f"K{n}", f"topic {n}") for n in range(1, 6)],
+                               [(i.item_id, f"K{n}") for n, i in enumerate(TOPIC_ITEMS, start=1)])
+    MERGED = topic_reply([("K1", "UPI MDR fee"), ("K2", "payment methods supported"), ("K3", "settlement time")],
+                         [("S1.1", "K1"), ("S2.1", "K1"), ("S1.2", "K2"), ("S2.2", "K2"), ("S3.1", "K3")])
+
+    def test_detection(self):
+        assert ga.is_degenerate(singles(TOPIC_ITEMS), TOPIC_ITEMS)
+        assert not ga.is_degenerate(singles(TOPIC_ITEMS[:2]), TOPIC_ITEMS[:2])  # one source only
+
+    def test_retry_on_next_model_fixes_it(self):
+        model = FakeModel({}, [self.ONE_PER_ITEM, self.MERGED], {})
+        claims, clustering = run(ga.cluster_topics(model, "q", TOPIC_ITEMS, {}))
+        assert model.fallbacks == 1 and clustering["method"] == "model_retry" and clustering["ranking"] == "ok"
+        assert [a["model"] for a in clustering["attempts"]] == ["fake-model", "fake-model-2"]
+        assert [c.source_count for c in claims] == [2, 2, 1]
+
+    def test_local_clustering_after_two_degenerate_replies(self):
+        model = FakeModel({}, [self.ONE_PER_ITEM, self.ONE_PER_ITEM], {})
+        claims, clustering = run(ga.cluster_topics(model, "q", TOPIC_ITEMS, {}))
+        assert [a["method"] for a in clustering["attempts"]] == ["model", "model", "local"]
+        assert clustering["method"] == "local" and clustering["ranking"] == "ok"
+        shared = {c.claim: c.sources for c in claims if c.source_count == 2}
+        assert sorted(shared.values()) == [["S1", "S2"], ["S1", "S2"]]  # UPI MDR and payment methods merged
+        assert any("upi" in label and "mdr" in label for label in shared)
+
+    def test_local_clusters_need_shared_content_words(self):
+        groups = ga.local_topic_groups([item("S1.1", "UPI MDR is zero"), item("S2.1", "Settlement takes two days")])
+        assert [ids for _, ids in groups] == [["S1.1"], ["S2.1"]]
+
+    def test_unreliable_marker_when_nothing_merges(self):
+        unrelated = [item("S1.1", "Paytm onboarding needs PAN"), item("S2.1", "Refunds reach cards within a week"),
+                     item("S3.1", "Webhooks retry failed deliveries")]
+        reply = topic_reply([("K1", "a"), ("K2", "b"), ("K3", "c")], [("S1.1", "K1"), ("S2.1", "K2"), ("S3.1", "K3")])
+        claims, clustering = run(ga.cluster_topics(FakeModel({}, reply, {}), "q", unrelated, {}))
+        assert clustering["method"] == "local" and clustering["ranking"] == "unreliable"
+        assert all(c.source_count == 1 for c in claims)
+
+    def test_report_lists_unreliable_queries(self):
+        payload = TestReport().payload()
+        model = TestReport().model()
+        model.extract_replies["https://b.com/fees"] = {"items": [
+            {"type": "fact", "text": "Setup fees range from nothing upward", "quote": "Setup fees range from nothing upward"}]}
+        model.topics_reply = topic_reply([("K1", "a"), ("K2", "b"), ("K3", "c")],
+                                         [("S1.1", "K1"), ("S1.2", "K2"), ("S2.1", "K3")])
+        report = run(run_gap_analysis(payload, model=model, crawler=_page))
+        assert report["ranking_unreliable_queries"] == [0]
+        assert report["queries"][0]["clustering"]["ranking"] == "unreliable"
+
+
+class TestCapabilityClaims:
+    def test_assertions_are_detected(self):
+        for sentence in (
+            "Razorpay offers instant settlements to every merchant.",
+            "Razorpay should add details stating that it supports over [add your real figure] payment methods.",
+            "Razorpay could add details that new merchants can receive zero platform fees under its promotional offer.",
+            "Razorpay should include details regarding its omnichannel payment capabilities.",
+        ):
+            assert ga.asserts_target_capability(sentence, "Razorpay"), sentence
+        for sentence in (
+            "Add a section on UPI MDR fees and state your real figures.",
+            "If Razorpay offers instant settlements, state the settlement time.",
+            "Publish your card MDR as [add your real figure].",
+        ):
+            assert not ga.asserts_target_capability(sentence, "Razorpay"), sentence
+
+    def test_unsupported_claim_rewritten_to_conditional(self):
+        text, flags = ga.check_target_claims(
+            "Add a section on new-merchant pricing. Razorpay could add details that new merchants can receive zero "
+            "platform fees for sales up to [add your real figure] under its promotional offer.", "Razorpay", None)
+        assert text == ("Add a section on new-merchant pricing. If Razorpay offers this, Razorpay could add details that "
+                        "new merchants can receive zero platform fees for sales up to [add your real figure] under its "
+                        "promotional offer.")
+        assert flags == ["unsupported_target_claim"]
+
+    def test_claim_backed_by_the_target_quote_is_kept(self):
+        quote = "Onboard and retain global users with subscriptions, recurring billing and multi-currency support."
+        sentence = "Razorpay should add details stating that it supports recurring billing and subscriptions for global users."
+        assert ga.check_target_claims(sentence, "Razorpay", quote) == (sentence, [])
+        assert ga.check_target_claims(sentence, "Razorpay", None)[1] == ["unsupported_target_claim"]
+
+    def test_judged_suggestion_is_checked_with_its_quote(self):
+        claims = topics([("fraud detection", ["S1.1", "S2.1"])], [item("S1.1"), item("S2.1")])
+        reply = {"judgements": [{"claim_id": "C1", "status": "missing", "target_quote": None,
+                                 "suggestion": "Razorpay should add details stating that it supports built-in fraud detection."}]}
+        rows = apply_judgements(claims, reply, {"https://razorpay.com/pg": MAIN}, {}, (), "Razorpay")
+        assert rows[0]["suggestion"].startswith("If Razorpay offers this, Razorpay should add details")
+        assert "unsupported_target_claim" in rows[0]["flags"]
+        assert rows[0]["suggestion_original"] == "Razorpay should add details stating that it supports built-in fraud detection."
+
+    def test_prompt_requires_topic_level_conditional_suggestions(self):
+        prompt = ga.build_judge_prompt("q", "Razorpay", singles([item("S1.1", "x")]), [])
+        assert "Add a section on" in prompt and "never copy a competitor-specific offer" in prompt
+        assert "If Razorpay offers" in prompt
+
+
+class TestSourceSkipping:
+    def payload(self, n):
+        return {"observation_id": "o", "sandbox_url": SANDBOX, "brand_name": "Acme",
+                "queries": [{"query_index": 0, "query": "card MDR", "sources": [src(f"https://s{i}.com/p", 20 - i) for i in range(n)]}],
+                "cached_texts": {}}
+
+    def model_for(self, productive_urls):
+        page = "Card MDR is 2% on most gateways in India."
+        good = {"items": [{"type": "figure", "text": "Card MDR is 2%", "quote": "Card MDR is 2% on most gateways"}]}
+
+        class Replies(dict):
+            def __missing__(self, url):
+                return good if url in productive_urls else {"items": []}
+
+        model = FakeModel(Replies(), topic_reply([("K1", "card MDR")], []), {"judgements": []})
+        return model, page
+
+    def test_zero_item_sources_are_replaced_by_the_next_cited(self):
+        productive = {f"https://s{i}.com/p" for i in (0, 2, 3, 5, 6, 8)}
+        model, page = self.model_for(productive)
+
+        async def crawler(url):
+            return {"full_content": page} if url != SANDBOX else {"full_content": "Acme gateway."}
+
+        q = run(run_gap_analysis(self.payload(12), model=model, crawler=crawler))["queries"][0]
+        assert [s["url"] for s in q["sources"] if s["productive"]] == [f"https://s{i}.com/p" for i in (0, 2, 3, 5, 6)]
+        assert q["source_attempts"] == {"tried": 7, "productive": 5, "candidates": 12}
+        assert [s["label"] for s in q["sources"]] == [f"S{n}" for n in range(1, 8)]
+
+    def test_attempts_are_capped_at_ten(self):
+        model, page = self.model_for({"https://s0.com/p"})
+
+        async def crawler(url):
+            return {"full_content": page}
+
+        q = run(run_gap_analysis(self.payload(15), model=model, crawler=crawler))["queries"][0]
+        assert q["source_attempts"] == {"tried": 10, "productive": 1, "candidates": 15}
+        assert sum(1 for c in model.calls if c["stage"] == "extract") == 10
+
+    def test_crawl_failures_count_as_attempts_without_model_calls(self):
+        model, page = self.model_for({f"https://s{i}.com/p" for i in range(10)})
+
+        async def crawler(url):
+            return {"error": "Failed to crawl: HTTP 403"} if url in ("https://s0.com/p", "https://s1.com/p") else {"full_content": page}
+
+        q = run(run_gap_analysis(self.payload(10), model=model, crawler=crawler))["queries"][0]
+        assert q["source_attempts"] == {"tried": 7, "productive": 5, "candidates": 10}
+        assert sum(1 for c in model.calls if c["stage"] == "extract") == 5
