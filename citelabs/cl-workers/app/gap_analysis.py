@@ -96,6 +96,35 @@ def select_sources(
     return cited, targets
 
 
+def _seen_in_pool(target: Mapping[str, Any]) -> bool:
+    """select_sources always lists the submitted page; it was in the query's pool only if it has appearances."""
+    return not target.get("submitted") or target.get("appearances") is not None
+
+
+def observation_target_pages(queries: Sequence[Mapping[str, Any]], sandbox_url: str) -> List[Dict[str, Any]]:
+    """
+    Every target page seen in the observation (any query) plus the submitted
+    page, one per page: the submitted page first, then by appearances summed
+    over the queries, then first seen. Each entry lists the query indexes it was
+    seen for.
+    """
+    pages: Dict[str, Dict[str, Any]] = {}
+    for q in queries:
+        _, targets = select_sources(q.get("sources") or [], sandbox_url, top_n=0)
+        for target in targets:
+            key = page_key(target["url"])
+            entry = pages.setdefault(key, {**target, "appearances": 0, "seen_for_queries": []})
+            entry["appearances"] += target.get("appearances") or 0
+            if _seen_in_pool(target):
+                entry["seen_for_queries"].append(q.get("query_index"))
+    if not pages:
+        pages[page_key(sandbox_url)] = {"url": sandbox_url, "submitted": True, "appearances": 0, "seen_for_queries": []}
+    ordered = list(pages.values())
+    first_seen = {id(p): n for n, p in enumerate(ordered)}
+    ordered.sort(key=lambda p: (not p.get("submitted"), -(p["appearances"] or 0), first_seen[id(p)]))
+    return ordered
+
+
 def source_token_budget(n_sources: int) -> int:
     return compute_per_source_token_budget(n_sources, TOTAL_TOKEN_BUDGET, PER_SOURCE_TOKEN_CAP, MIN_SOURCE_TOKENS)
 
@@ -597,19 +626,27 @@ def check_target_claims(suggestion: str, brand: str, supporting_quote: Optional[
 
 MIN_QUOTE_WORDS = 8
 MIN_QUOTE_CHARS = 40
+MIN_FIGURE_QUOTE_WORDS = 4  # a shorter quote is enough when it states a figure from main content
 _MENU_SEPARATORS = "|\u2022\u00b7\u00bb\u203a>/\u2013\u2014"
 
 
 def quote_quality(quote: str, page: PageText, other_pages: Sequence[str] = ()) -> Optional[str]:
     """
     Why a target quote is too weak to prove coverage, or None if it is usable:
-    too_short, menu_like (separators, or a run of capitalised words with no
-    sentence punctuation), page_chrome (only in the header/nav/footer/aside),
+    too_short (under 8 words or 40 characters, unless it has at least 4 words,
+    contains a number or percent sign and is found in the page's main content),
+    menu_like (separators, or a run of capitalised words with no sentence
+    punctuation), page_chrome (only in the header/nav/footer/aside),
     not_in_main_content, or repeated_on_other_target_pages (site-wide text).
     """
     words = normalize_for_match(quote).split()
     if len(words) < MIN_QUOTE_WORDS or len(" ".join(words)) < MIN_QUOTE_CHARS:
-        return "too_short"
+        short_figure = (
+            len(words) >= MIN_FIGURE_QUOTE_WORDS and re.search(r"\d|%", quote)
+            and page.main is not None and quote_in_text(quote, page.main)
+        )
+        if not short_figure:
+            return "too_short"
     raw_words = [w for w in quote.split() if any(ch.isalpha() for ch in w)]
     separators = sum(quote.count(ch) for ch in _MENU_SEPARATORS) + quote.count(" - ")
     capitalised = sum(1 for w in raw_words if w.lstrip("\"'(")[:1].isupper())
@@ -1122,9 +1159,17 @@ async def cluster_topics(model, query: str, items: Sequence[EvidenceItem], appea
 
 
 async def analyze_query(
-    query: Mapping[str, Any], sandbox_url: str, brand: str, store: TextStore, model, extraction_concurrency: int = 3
+    query: Mapping[str, Any], sandbox_url: str, brand: str, store: TextStore, model, extraction_concurrency: int = 3,
+    all_targets: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    candidates, targets = select_sources(query.get("sources") or [], sandbox_url, top_n=None)
+    """
+    One query's report section. Coverage is judged against all_targets (every
+    target page of the observation plus the submitted page) when given, else
+    against this query's own target pages.
+    """
+    candidates, query_targets = select_sources(query.get("sources") or [], sandbox_url, top_n=None)
+    query_target_keys = {page_key(t["url"]) for t in query_targets if _seen_in_pool(t)}
+    targets = list(all_targets) if all_targets is not None else query_targets
     budget = source_token_budget(min(TOP_CITED, len(candidates)) + len(targets))
     result: Dict[str, Any] = {
         "query_index": query.get("query_index"),
@@ -1133,6 +1178,7 @@ async def analyze_query(
         "sources": [],
         "target_pages": [],
         "clustering": None,
+        "judged_against": [],
         "gaps": [],
         "other_claims": [],
         "errors": [],
@@ -1185,9 +1231,11 @@ async def analyze_query(
         result["target_pages"].append({
             "label": f"T{n}", "url": target["url"], "submitted": target.get("submitted", False),
             "appearances": target.get("appearances"), "text_source": origin, "error": crawl_error,
+            "seen_for_query": page_key(target["url"]) in query_target_keys,
         })
         if page:
             target_texts[target["url"]] = page
+    result["judged_against"] = [t["url"] for t in result["target_pages"] if t["url"] in target_texts]
     competitor_names = cited_brand_names(candidates[:tried], brand)
 
     if not items:
@@ -1261,14 +1309,15 @@ async def run_gap_analysis(
     started = time.monotonic()
     queries = []
     deadline_reached = False
+    all_targets = observation_target_pages(payload.get("queries") or [], sandbox_url)
     for query in payload.get("queries") or []:
         if time.monotonic() - started >= time_limit:
             deadline_reached = True
             queries.append({"query_index": query.get("query_index"), "query": query["query"], "sources": [],
-                            "target_pages": [], "clustering": None, "gaps": [], "other_claims": [],
+                            "target_pages": [], "clustering": None, "judged_against": [], "gaps": [], "other_claims": [],
                             "errors": [f"not analyzed: the {time_limit:.0f}-second run limit was reached"]})
             continue
-        queries.append(await analyze_query(query, sandbox_url, brand, store, model))
+        queries.append(await analyze_query(query, sandbox_url, brand, store, model, all_targets=all_targets))
     deadline_reached = deadline_reached or any(
         "RunDeadlineExceeded" in (c.get("error") or "") for c in getattr(model, "calls", [])
     ) or any("run time limit" in e for q in queries for e in q["errors"])
@@ -1294,6 +1343,9 @@ async def run_gap_analysis(
             "model_pool": getattr(model, "model_pool", None),
         },
         "deadline_reached": deadline_reached,
+        # Coverage of every query is judged against all of these
+        "target_pages": [{"url": t["url"], "submitted": bool(t.get("submitted")), "appearances": t.get("appearances"),
+                          "seen_for_queries": t.get("seen_for_queries", [])} for t in all_targets],
         # Queries whose topic ranking could not be trusted (no topic shared by two sources, even after fallbacks)
         "ranking_unreliable_queries": [q["query_index"] for q in queries
                                        if (q.get("clustering") or {}).get("ranking") == "unreliable"],

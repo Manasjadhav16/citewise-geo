@@ -274,7 +274,9 @@ class TestReport:
         assert crawled == ["https://b.com/fees", "https://dead.com/x", SANDBOX]  # cached page not re-crawled
         assert set(report) == {"version", "observation_id", "sandbox_url", "brand_name", "generated_at", "model",
                                "settings", "model_calls", "seconds", "queries", "deadline_reached",
-                               "ranking_unreliable_queries"}
+                               "ranking_unreliable_queries", "target_pages"}
+        assert report["target_pages"] == [{"url": SANDBOX, "submitted": True, "appearances": 0, "seen_for_queries": []}]
+        assert report["queries"][0]["judged_against"] == [SANDBOX]
         assert report["ranking_unreliable_queries"] == []
         assert report["deadline_reached"] is False and report["settings"]["run_time_limit_seconds"] == 600
         assert report["version"] == "gap_v2" and report["model"] == "fake-model"
@@ -832,3 +834,83 @@ class TestSourceSkipping:
         q = run(run_gap_analysis(self.payload(10), model=model, crawler=crawler))["queries"][0]
         assert q["source_attempts"] == {"tried": 7, "productive": 5, "candidates": 10}
         assert sum(1 for c in model.calls if c["stage"] == "extract") == 5
+
+
+# ---------- target pages across the observation, short quotes with figures ----------
+
+class TestObservationTargetPages:
+    def payload(self):
+        payload = TestReport().payload()
+        payload["queries"][0]["sources"].append(src("https://acme.in/blog/upi", 1, group="target", category="target_company"))
+        payload["queries"].append({"query_index": 1, "query": "Card fees in India", "sources": [
+            src("https://acme.in/pricing", 3, group="target", category="target_company"),
+            src("https://acme.in/blog/upi", 2, group="target", category="target_company"),
+            src("https://acme.in/payment-gateway", 1, group="target", category="target_company"),  # the submitted page
+        ]})
+        return payload
+
+    def test_union_of_target_pages(self):
+        pages = ga.observation_target_pages(self.payload()["queries"], SANDBOX)
+        assert [(p["url"], p["appearances"], p["seen_for_queries"]) for p in pages] == [
+            (SANDBOX, 1, [1]), ("https://acme.in/blog/upi", 3, [0, 1]), ("https://acme.in/pricing", 3, [1]),
+        ]
+
+    def test_every_query_is_judged_against_all_target_pages(self):
+        texts = {SANDBOX: PAGES[SANDBOX], "https://acme.in/pricing": "Acme pricing: card MDR is 2% on every plan.",
+                 "https://acme.in/blog/upi": "UPI payments on Acme carry 0% MDR for all merchants."}
+
+        async def crawler(url):
+            if url in texts:
+                return {"full_content": texts[url], "main_content": texts[url], "chrome_content": ""}
+            return {"full_content": PAGES.get(url, "")}
+
+        model = TestReport().model()
+        report = run(run_gap_analysis(self.payload(), model=model, crawler=crawler))
+        q0 = report["queries"][0]
+        assert q0["judged_against"] == [SANDBOX, "https://acme.in/blog/upi", "https://acme.in/pricing"]
+        assert [(t["url"], t["seen_for_query"]) for t in q0["target_pages"]] == [
+            (SANDBOX, False), ("https://acme.in/blog/upi", True), ("https://acme.in/pricing", False),
+        ]
+        judge_prompt = [p for stage, p in model.prompts if stage == "judge"][0]
+        assert "https://acme.in/pricing" in judge_prompt  # a page seen only for query 1 is used for query 0
+        assert [t["url"] for t in report["target_pages"]] == q0["judged_against"]
+
+    def test_target_page_without_text_is_not_judged_against(self):
+        async def crawler(url):
+            if url == "https://acme.in/pricing":
+                return {"error": "Failed to crawl: HTTP 404"}
+            return {"full_content": PAGES.get(url, "Acme blog about UPI fees for merchants.")}
+
+        report = run(run_gap_analysis(self.payload(), model=TestReport().model(), crawler=crawler))
+        assert "https://acme.in/pricing" not in report["queries"][0]["judged_against"]
+        assert any(t["url"] == "https://acme.in/pricing" and t["error"] for t in report["queries"][0]["target_pages"])
+
+
+class TestShortFigureQuotes:
+    MAIN = "Pricing for merchants. UPI MDR 0% on regular UPI. Card payments cost 2% each."
+
+    def test_short_quote_with_a_figure_from_main_content_is_accepted(self):
+        page = ga.PageText(self.MAIN, main=self.MAIN, chrome="")
+        assert ga.quote_quality("UPI MDR 0% on regular UPI", page) is None
+        assert ga.quote_quality("Card payments cost 2%", page) is None  # exactly 4 words
+
+    def test_still_too_short_without_a_figure_too_few_words_or_main_content(self):
+        page = ga.PageText(self.MAIN, main=self.MAIN, chrome="")
+        assert ga.quote_quality("Pricing for merchants", page) == "too_short"  # no number
+        assert ga.quote_quality("costs 2% each", page) == "too_short"  # 3 words
+        assert ga.quote_quality("UPI MDR 0% on regular UPI", ga.PageText(self.MAIN)) == "too_short"  # sections unknown
+        chrome = "Plans from 0% MDR today"
+        assert ga.quote_quality(chrome, ga.PageText(self.MAIN + " " + chrome, main=self.MAIN, chrome=chrome)) == "too_short"
+
+    def test_menu_and_repeat_checks_still_apply_to_short_figure_quotes(self):
+        menu = "Plans | 2% | Pricing | Docs"
+        assert ga.quote_quality(menu, ga.PageText(menu, main=menu, chrome="")) == "menu_like"
+        page = ga.PageText(self.MAIN, main=self.MAIN, chrome="")
+        assert ga.quote_quality("UPI MDR 0% on regular UPI", page, other_pages=["Footer: UPI MDR 0% on regular UPI."]) \
+            == "repeated_on_other_target_pages"
+
+    def test_short_figure_quote_keeps_a_covered_verdict(self):
+        claims = topics([("UPI MDR fee", ["S1.1", "S2.1"])], [item("S1.1"), item("S2.1")])
+        reply = {"judgements": [{"claim_id": "C1", "status": "covered", "target_quote": "UPI MDR 0% on regular UPI"}]}
+        rows = apply_judgements(claims, reply, {"https://acme.in/p": ga.PageText(self.MAIN, self.MAIN, "")}, {})
+        assert rows[0]["target_status"] == "covered" and rows[0]["target_quote_quality"] == "ok" and rows[0]["flags"] == []
