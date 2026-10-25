@@ -56,7 +56,7 @@ PER_SOURCE_TOKEN_CAP = 1000
 MIN_SOURCE_TOKENS = 200  # b_min
 MAX_PAGE_CHARS = 40000  # page text passed to one extraction call
 ITEM_TYPES = ("fact", "figure", "definition", "product_detail", "comparison", "claim")
-STATUSES = ("covered", "partly", "missing")
+STATUSES = ("covered", "partly", "missing")  # judge verdicts; "uncertain" is set by the code, never by the model
 TARGET_GROUP = "target"
 
 
@@ -567,13 +567,11 @@ def check_suggestion(
 _CONDITIONAL = re.compile(r"\b(if|whether|only if|in case|where applicable|if applicable|if any)\b", re.IGNORECASE)
 _CAPABILITY_VERBS = (r"offers?|provides?|supports?|includes?|has|have|charges?|gives?|enables?|allows?|lets|features|"
                      r"accepts?|settles?|processes|guarantees?|delivers?|waives?")
-_ASSERTING_FRAME = re.compile(
-    r"\b(?:stating|specifying|clarifying|confirming|showing|noting|explaining|saying|state|specify|confirm)\s+that\b"
-    r"|\b(?:details|information|text|copy)\s+that\b", re.IGNORECASE)
-_PROMOTION = re.compile(r"\b(?:zero|free|no\s+(?:setup\s+|platform\s+|annual\s+)?fees?|discount\w*|cashback|"
-                        r"promotional|promotion|festive\s+offer|waiver|waived)\b|\b0\s?%", re.IGNORECASE)
-_POSSESSIVE = re.compile(r"\b(?:its|their)\s+(?:[\w-]+\s+){0,3}(?:capabilit(?:y|ies)|features?|tools?|offers?|"
-                         r"support|integrations?|plans?|pricing|rates?|fees?)\b", re.IGNORECASE)
+# Adverbs and modals allowed between the subject and the verb ("Razorpay also offers", "it can support")
+_BETWEEN = r"(?:(?:also|now|already|currently|still|can|will|does|do|always)\s+){0,2}"
+# Pure definitions and explanations are never claims about the brand
+_DEFINITION = re.compile(r"\b(?:also\s+known\s+as|is\s+defined\s+as|are\s+defined\s+as|refers?\s+to|"
+                         r"definition\s+of|is\s+called|are\s+called)\b", re.IGNORECASE)
 _SUGGESTION_WORDS = {"add", "section", "page", "real", "figure", "figures", "state", "details", "detail", "include",
                      "should", "could", "information", "explicitly", "clarify", "publish", "specific", "specifying",
                      "stating", "list", "outline"}
@@ -585,19 +583,23 @@ def split_sentences(text: str) -> List[str]:
 
 def asserts_target_capability(sentence: str, brand: str) -> bool:
     """
-    True when the sentence presents a capability, price or promotion of the
-    target as fact ("Razorpay offers ...", "add details stating that it supports
-    ...", "its fraud-detection features", a zero-fee offer), rather than asking
-    the brand to state its own real details. Conditional sentences never count.
+    True only when the target is the subject of a capability verb: the brand
+    name, "we", "you", "your page/site/...", or "it" in a sentence that names the
+    brand, followed by offers, supports, provides, includes, has and similar
+    ("Razorpay offers ...", "add details stating that it supports ..."). General
+    definitions and explanations ("also known as", "is defined as", a sentence
+    whose subject is not the brand) and conditional sentences never count.
     """
-    if _CONDITIONAL.search(sentence):
+    if _CONDITIONAL.search(sentence) or _DEFINITION.search(sentence):
         return False
-    names = r"(?:" + re.escape(brand) + r"|it|they)" if brand else r"(?:it|they)"
-    direct = re.search(r"\b" + names + r"\s+(?:also\s+|now\s+|already\s+)?(?:" + _CAPABILITY_VERBS + r")\b",
-                       sentence, re.IGNORECASE)
-    framed = _ASSERTING_FRAME.search(sentence) and (
-        re.search(r"\b(?:" + _CAPABILITY_VERBS + r"|can\s+(?:get|receive|use|accept|enjoy)|receive|is|are)\b", sentence, re.IGNORECASE))
-    return bool(direct or framed or _PROMOTION.search(sentence) or _POSSESSIVE.search(sentence))
+    subjects = [r"\bwe", r"\byou", r"\byour\s+(?:page|site|website|platform|gateway|product|service|business)"]
+    if brand:
+        # the brand, or its own product ("Razorpay's dashboard", "Razorpay's payment gateway")
+        subjects.append(r"\b" + re.escape(brand) + r"(?:['\u2019]s(?:\s+[\w-]+){0,2})?")
+        if re.search(r"\b" + re.escape(brand) + r"\b", sentence, re.IGNORECASE):
+            subjects.append(r"\bit")  # "it" counts only when the sentence is about the brand
+    pattern = r"(?:" + "|".join(subjects) + r")\s+" + _BETWEEN + r"(?:" + _CAPABILITY_VERBS + r")\b"
+    return bool(re.search(pattern, sentence, re.IGNORECASE))
 
 
 def check_target_claims(suggestion: str, brand: str, supporting_quote: Optional[str]) -> Tuple[str, List[str]]:
@@ -748,9 +750,89 @@ def apply_judgements(
     return rows
 
 
+_PASS_FIELDS = ("target_status", "target_quote", "target_url", "target_quote_quality", "suggestion", "flags")
+
+
+def combine_passes(rows_a: Sequence[Dict[str, Any]], rows_b: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    One row per topic from two judging passes (rows from apply_judgements, same
+    topic order). Same status: that verdict is kept (with a verified quote from
+    either pass). Different statuses: "uncertain", with both verdicts and quotes
+    kept under "verdicts" and the gap suggestion of the pass that found a gap.
+    rows_b None (the second pass failed): the first pass is kept, marked as a
+    single pass and left out of the agreement figures.
+    """
+    combined = []
+    for n, row_a in enumerate(rows_a):
+        row = dict(row_a)
+        row["verdicts"] = [{"pass": 1, **{k: row_a[k] for k in _PASS_FIELDS}}]
+        if rows_b is None:
+            row["judge_agreement"] = None
+            row["flags"] = row_a["flags"] + ["single_judge_pass"]
+            combined.append(row)
+            continue
+        row_b = rows_b[n]
+        row["verdicts"].append({"pass": 2, **{k: row_b[k] for k in _PASS_FIELDS}})
+        if row_a["target_status"] == row_b["target_status"]:
+            row["judge_agreement"] = True
+            if row_a["target_quote"] is None and row_b["target_quote"] is not None:
+                for key in ("target_quote", "target_url", "target_quote_quality"):
+                    row[key] = row_b[key]
+            row["flags"] = list(dict.fromkeys(row_a["flags"] + row_b["flags"]))
+        else:
+            row["judge_agreement"] = False
+            gap_pass = next((r for r in (row_a, row_b) if r["target_status"] == "missing"),
+                            next((r for r in (row_a, row_b) if r["target_status"] == "partly"), row_a))
+            row.update(target_status="uncertain", target_quote=None, target_url=None, target_quote_quality=None,
+                       suggestion=gap_pass["suggestion"], suggestion_original=gap_pass.get("suggestion_original"),
+                       flags=list(dict.fromkeys(["judge_disagreement"] + row_a["flags"] + row_b["flags"])))
+        combined.append(row)
+    return combined
+
+
+def find_supporting_passage(claim: "Claim", target_texts: Mapping[str, Union[str, PageText]]) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic check behind a "missing" verdict: the first passage of a
+    judged target page (main content when known) that contains the topic's key
+    words (at least two, or all if the label has fewer), or one key word and a
+    number the sources state. Returns the passage with what matched, or None.
+    """
+    keywords = sorted(_topic_terms(claim.claim))
+    numbers = {n for text in claim.texts for n in numbers_in(text)}
+    if not keywords:
+        return None
+    needed = min(2, len(keywords))
+    for url, value in target_texts.items():
+        page = as_page(value)
+        for passage in split_passages(page.main or page.text):
+            words = _terms(passage)
+            hit_words = [k for k in keywords if k in words]
+            hit_numbers = sorted(n for n in numbers if n in set(numbers_in(passage)))
+            if len(hit_words) >= needed or (hit_words and hit_numbers):
+                return {"url": url, "passage": passage[:600], "matched_terms": hit_words, "matched_numbers": hit_numbers}
+    return None
+
+
+def check_missing_verdicts(rows: Sequence[Dict[str, Any]], claims: Sequence["Claim"],
+                           target_texts: Mapping[str, Union[str, PageText]]) -> List[Dict[str, Any]]:
+    """An agreed (or single-pass) "missing" whose topic words are found on a target page becomes "uncertain"."""
+    by_id = {c.claim_id: c for c in claims}
+    out = []
+    for row in rows:
+        row = dict(row)
+        row["missing_check"] = None
+        if row["target_status"] == "missing" and row["claim_id"] in by_id:
+            found = find_supporting_passage(by_id[row["claim_id"]], target_texts)
+            if found:
+                row.update(target_status="uncertain", missing_check=found,
+                           flags=row["flags"] + ["missing_but_passage_found"])
+        out.append(row)
+    return out
+
+
 def rank_gaps(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Most-supported first; at equal support, missing before partly before covered."""
-    order = {"missing": 0, "partly": 1, "covered": 2}
+    """Most-supported first; at equal support, missing, then uncertain, then partly, then covered."""
+    order = {"missing": 0, "uncertain": 1, "partly": 2, "covered": 3}
     ranked = sorted(rows, key=lambda r: (-r["source_count"], order.get(r["target_status"], 3)))
     return [{"rank": n, **r} for n, r in enumerate(ranked, start=1)]
 
@@ -1179,6 +1261,7 @@ async def analyze_query(
         "target_pages": [],
         "clustering": None,
         "judged_against": [],
+        "judge": None,
         "gaps": [],
         "other_claims": [],
         "errors": [],
@@ -1261,14 +1344,27 @@ async def analyze_query(
         if target_page:  # main content when known, so menus and footers are not offered as evidence
             excerpts.append({"label": page["label"], "url": page["url"],
                              "excerpt": select_excerpt(target_page.main or target_page.text, query["query"], judged, budget)})
-    try:
-        verdicts = await model.generate_json(
-            "judge", build_judge_prompt(query["query"], brand, judged, excerpts), max_tokens=JUDGE_MAX_TOKENS
-        )
-    except Exception as exc:
-        result["errors"].append(f"coverage judgement failed: {str(exc)[:200]}")
-        verdicts = {}
-    result["gaps"] = rank_gaps(apply_judgements(judged, verdicts, target_texts, source_urls, competitor_names, brand))
+    # Two passes, the second with the topics in reverse order (same ids), so a
+    # verdict that depends on position or chance shows up as disagreement
+    passes = []
+    for n, order in enumerate((judged, list(reversed(judged))), start=1):
+        try:
+            verdicts = await model.generate_json(
+                "judge", build_judge_prompt(query["query"], brand, order, excerpts), max_tokens=JUDGE_MAX_TOKENS
+            )
+        except Exception as exc:
+            result["errors"].append(f"coverage judgement pass {n} failed: {str(exc)[:200]}")
+            continue
+        passes.append(apply_judgements(judged, verdicts, target_texts, source_urls, competitor_names, brand))
+    if not passes:
+        passes.append(apply_judgements(judged, {}, target_texts, source_urls, competitor_names, brand))
+    rows = combine_passes(passes[0], passes[1] if len(passes) > 1 else None)
+    rows = check_missing_verdicts(rows, judged, target_texts)
+    compared = [r for r in rows if r["judge_agreement"] is not None]
+    agreed = sum(1 for r in compared if r["judge_agreement"])
+    result["judge"] = {"passes": len(passes), "topics": len(rows), "compared": len(compared), "agreed": agreed,
+                       "agreement": round(agreed / len(compared), 3) if compared else None}
+    result["gaps"] = rank_gaps(rows)
     return result
 
 
@@ -1283,6 +1379,12 @@ def cited_brand_names(cited: Sequence[Mapping[str, Any]], brand: str) -> List[st
         if len(label) >= 4 and label not in _GENERIC_LABELS and label != brand.lower():
             names.append(label)
     return list(dict.fromkeys(names))
+
+
+def judge_agreement(queries: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    compared = sum((q.get("judge") or {}).get("compared", 0) for q in queries)
+    agreed = sum((q.get("judge") or {}).get("agreed", 0) for q in queries)
+    return {"compared": compared, "agreed": agreed, "share": round(agreed / compared, 3) if compared else None}
 
 
 RUN_TIME_LIMIT_SECONDS = 600.0
@@ -1314,7 +1416,8 @@ async def run_gap_analysis(
         if time.monotonic() - started >= time_limit:
             deadline_reached = True
             queries.append({"query_index": query.get("query_index"), "query": query["query"], "sources": [],
-                            "target_pages": [], "clustering": None, "judged_against": [], "gaps": [], "other_claims": [],
+                            "target_pages": [], "clustering": None, "judged_against": [], "judge": None, "gaps": [],
+                            "other_claims": [],
                             "errors": [f"not analyzed: the {time_limit:.0f}-second run limit was reached"]})
             continue
         queries.append(await analyze_query(query, sandbox_url, brand, store, model, all_targets=all_targets))
@@ -1346,6 +1449,8 @@ async def run_gap_analysis(
         # Coverage of every query is judged against all of these
         "target_pages": [{"url": t["url"], "submitted": bool(t.get("submitted")), "appearances": t.get("appearances"),
                           "seen_for_queries": t.get("seen_for_queries", [])} for t in all_targets],
+        # Share of judged topics where the two judging passes gave the same verdict
+        "judge_agreement": judge_agreement(queries),
         # Queries whose topic ranking could not be trusted (no topic shared by two sources, even after fallbacks)
         "ranking_unreliable_queries": [q["query_index"] for q in queries
                                        if (q.get("clustering") or {}).get("ranking") == "unreliable"],

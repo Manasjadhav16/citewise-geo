@@ -274,14 +274,15 @@ class TestReport:
         assert crawled == ["https://b.com/fees", "https://dead.com/x", SANDBOX]  # cached page not re-crawled
         assert set(report) == {"version", "observation_id", "sandbox_url", "brand_name", "generated_at", "model",
                                "settings", "model_calls", "seconds", "queries", "deadline_reached",
-                               "ranking_unreliable_queries", "target_pages"}
+                               "ranking_unreliable_queries", "target_pages", "judge_agreement"}
+        assert report["judge_agreement"] == {"compared": 2, "agreed": 2, "share": 1.0}
         assert report["target_pages"] == [{"url": SANDBOX, "submitted": True, "appearances": 0, "seen_for_queries": []}]
         assert report["queries"][0]["judged_against"] == [SANDBOX]
         assert report["ranking_unreliable_queries"] == []
         assert report["deadline_reached"] is False and report["settings"]["run_time_limit_seconds"] == 600
         assert report["version"] == "gap_v2" and report["model"] == "fake-model"
-        assert report["model_calls"]["total"] == 4  # 2 extractions (dead page skipped), 1 topic batch, 1 judgement
-        assert report["model_calls"]["by_stage"] == {"extract": 2, "topics": 1, "judge": 1}
+        assert report["model_calls"]["total"] == 5  # 2 extractions (dead page skipped), 1 topic batch, 2 judging passes
+        assert report["model_calls"]["by_stage"] == {"extract": 2, "topics": 1, "judge": 2}
 
         q = report["queries"][0]
         assert q["per_source_token_budget"] == 1000
@@ -745,24 +746,29 @@ class TestCapabilityClaims:
         for sentence in (
             "Razorpay offers instant settlements to every merchant.",
             "Razorpay should add details stating that it supports over [add your real figure] payment methods.",
-            "Razorpay could add details that new merchants can receive zero platform fees under its promotional offer.",
-            "Razorpay should include details regarding its omnichannel payment capabilities.",
+            "Razorpay also provides zero setup fees for new merchants.",
+            "We support recurring billing in 25 currencies.",
+            "Your page includes a fee calculator.",
+            "Razorpay's dashboard has built-in fraud detection.",
         ):
             assert ga.asserts_target_capability(sentence, "Razorpay"), sentence
         for sentence in (
             "Add a section on UPI MDR fees and state your real figures.",
             "If Razorpay offers instant settlements, state the settlement time.",
             "Publish your card MDR as [add your real figure].",
+            # the subject is not the brand
+            "Razorpay could add details that new merchants can receive zero platform fees under its promotional offer.",
+            "Cashfree offers 180+ payment methods.",
+            "Add a section explaining that it supports UPI.",  # "it" without the brand in the sentence
         ):
             assert not ga.asserts_target_capability(sentence, "Razorpay"), sentence
 
     def test_unsupported_claim_rewritten_to_conditional(self):
         text, flags = ga.check_target_claims(
-            "Add a section on new-merchant pricing. Razorpay could add details that new merchants can receive zero "
-            "platform fees for sales up to [add your real figure] under its promotional offer.", "Razorpay", None)
-        assert text == ("Add a section on new-merchant pricing. If Razorpay offers this, Razorpay could add details that "
-                        "new merchants can receive zero platform fees for sales up to [add your real figure] under its "
-                        "promotional offer.")
+            "Add a section on new-merchant pricing. Razorpay offers zero platform fees for sales up to "
+            "[add your real figure] under a festive offer.", "Razorpay", None)
+        assert text == ("Add a section on new-merchant pricing. If Razorpay offers this, Razorpay offers zero platform "
+                        "fees for sales up to [add your real figure] under a festive offer.")
         assert flags == ["unsupported_target_claim"]
 
     def test_claim_backed_by_the_target_quote_is_kept(self):
@@ -914,3 +920,125 @@ class TestShortFigureQuotes:
         reply = {"judgements": [{"claim_id": "C1", "status": "covered", "target_quote": "UPI MDR 0% on regular UPI"}]}
         rows = apply_judgements(claims, reply, {"https://acme.in/p": ga.PageText(self.MAIN, self.MAIN, "")}, {})
         assert rows[0]["target_status"] == "covered" and rows[0]["target_quote_quality"] == "ok" and rows[0]["flags"] == []
+
+
+# ---------- two judging passes, deterministic missing check, definitions ----------
+
+def judge(*verdicts):
+    return {"judgements": [{"claim_id": c, "status": st, "target_quote": q, "suggestion": sg} for c, st, q, sg in verdicts]}
+
+
+class TwoPassModel(FakeModel):
+    """Judge replies per pass; everything else as FakeModel."""
+
+    def __init__(self, base, judge_replies):
+        super().__init__(base.extract_replies, base.topics_reply, None)
+        self.judge_replies = list(judge_replies)
+
+    async def generate_json(self, stage, prompt, max_tokens=4096):
+        if stage != "judge":
+            return await super().generate_json(stage, prompt, max_tokens)
+        self.calls.append({"stage": stage, "attempt": 1, "ok": True, "model": self.model_name})
+        self.prompts.append((stage, prompt))
+        reply = self.judge_replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+COVERED_QUOTE = "Pricing: 2% per card payment on every standard plan"
+
+
+class TestTwoPassJudging:
+    def run_with(self, *judge_replies, crawler=None):
+        model = TwoPassModel(TestReport().model(), judge_replies)
+        return run(run_gap_analysis(TestReport().payload(), model=model, crawler=crawler or _page)), model
+
+    def test_agreeing_passes_keep_the_verdict(self):
+        reply = judge(("C1", "covered", COVERED_QUOTE, None), ("C2", "missing", None, "Add a section on UPI MDR."))
+        report, model = self.run_with(reply, reply)
+        q = report["queries"][0]
+        assert [(g["claim"], g["target_status"], g["judge_agreement"]) for g in q["gaps"]] == [
+            ("card MDR", "covered", True), ("UPI MDR", "missing", True)]
+        assert q["judge"] == {"passes": 2, "topics": 2, "compared": 2, "agreed": 2, "agreement": 1.0}
+        assert [len(g["verdicts"]) for g in q["gaps"]] == [2, 2]
+        judge_prompts = [p for stage, p in model.prompts if stage == "judge"]
+        assert judge_prompts[0].index("C1 topic") < judge_prompts[0].index("C2 topic")
+        assert judge_prompts[1].index("C2 topic") < judge_prompts[1].index("C1 topic")  # second pass reversed
+
+    def test_disagreeing_passes_give_uncertain_with_both_verdicts(self):
+        first = judge(("C1", "covered", COVERED_QUOTE, None), ("C2", "missing", None, "Add a section on UPI MDR."))
+        second = judge(("C1", "missing", None, "Add a section on card MDR and state your real figures."),
+                       ("C2", "missing", None, "Add a section on UPI MDR."))
+        report, _ = self.run_with(first, second)
+        gaps = {g["claim"]: g for g in report["queries"][0]["gaps"]}
+        card = gaps["card MDR"]
+        assert card["target_status"] == "uncertain" and card["judge_agreement"] is False
+        assert [(v["pass"], v["target_status"], v["target_quote"]) for v in card["verdicts"]] == [
+            (1, "covered", COVERED_QUOTE), (2, "missing", None)]
+        assert card["suggestion"] == "Add a section on card MDR and state your real figures."
+        assert "judge_disagreement" in card["flags"]
+        assert report["judge_agreement"] == {"compared": 2, "agreed": 1, "share": 0.5}
+        assert report["queries"][0]["gaps"][0]["claim"] == "card MDR"  # still ranked by distinct sources
+
+    def test_one_failed_pass_keeps_the_other_as_single_pass(self):
+        reply = judge(("C1", "covered", COVERED_QUOTE, None), ("C2", "missing", None, "Add a section on UPI MDR."))
+        report, _ = self.run_with(reply, RuntimeError("400 INVALID_ARGUMENT"))
+        q = report["queries"][0]
+        assert q["judge"]["passes"] == 1 and q["judge"]["compared"] == 0 and q["judge"]["agreement"] is None
+        assert all("single_judge_pass" in g["flags"] for g in q["gaps"])
+        assert report["judge_agreement"]["share"] is None
+
+    def test_combine_passes_unit(self):
+        row = lambda status, quote=None: {"target_status": status, "target_quote": quote, "target_url": "u" if quote else None,
+                                          "target_quote_quality": "ok" if quote else None, "suggestion": None, "flags": []}
+        agreed, = ga.combine_passes([row("partly")], [row("partly", "a quote with 8 words is long enough here")])
+        assert agreed["target_status"] == "partly" and agreed["target_quote"].startswith("a quote")  # quote from pass 2
+
+
+class TestDeterministicMissingCheck:
+    def test_missing_verdict_with_a_matching_passage_becomes_uncertain(self):
+        target = "Acme pricing. UPI MDR is 0% on all regular UPI payments for merchants. Card payments cost 2%."
+        claims = topics([("UPI MDR fee", ["S1.1", "S2.1"])],
+                        [item("S1.1", "Paytm charges 0% UPI MDR"), item("S2.1", "UPI MDR is zero at Cashfree")])
+        rows = ga.combine_passes(*(apply_judgements(claims, judge(("C1", "missing", None, None)), {"https://acme.in/p": target}, {})
+                                   for _ in range(2)))
+        rows = ga.check_missing_verdicts(rows, claims, {"https://acme.in/p": target})
+        assert rows[0]["target_status"] == "uncertain" and "missing_but_passage_found" in rows[0]["flags"]
+        found = rows[0]["missing_check"]
+        assert found["url"] == "https://acme.in/p" and "UPI MDR is 0%" in found["passage"]
+        assert found["matched_terms"] == ["mdr", "upi"] and found["matched_numbers"] == ["0"]
+
+    def test_missing_stays_missing_when_nothing_matches(self):
+        claims = topics([("settlement time", ["S1.1"])], [item("S1.1", "PayU settles in T+2 days")])
+        rows = ga.check_missing_verdicts(
+            apply_judgements(claims, judge(("C1", "missing", None, None)), {"u": "Acme accepts UPI and cards."}, {}),
+            claims, {"u": "Acme accepts UPI and cards."})
+        assert rows[0]["target_status"] == "missing" and rows[0]["missing_check"] is None
+
+    def test_one_keyword_needs_a_source_number(self):
+        claim = topics([("settlement time", ["S1.1"])], [item("S1.1", "PayU settles funds in 2 days")])[0]
+        assert ga.find_supporting_passage(claim, {"u": "Settlement happens quickly."}) is None
+        found = ga.find_supporting_passage(claim, {"u": "Settlement happens in 2 working days."})
+        assert found["matched_terms"] == ["settlement"] and found["matched_numbers"] == ["2"]
+
+    def test_uses_main_content_not_navigation(self):
+        claim = topics([("UPI MDR fee", ["S1.1"])], [item("S1.1", "UPI MDR is 0%")])[0]
+        page = ga.PageText("Nav: UPI MDR pricing docs. Welcome to Acme.", main="Welcome to Acme.", chrome="Nav: UPI MDR pricing docs.")
+        assert ga.find_supporting_passage(claim, {"u": page}) is None
+
+
+class TestDefinitionsAreNotClaims:
+    def test_definition_sentence_is_not_flagged_or_rewritten(self):
+        sentence = ("Add a section on definition of MDR and state your real figures, explaining that transaction fees for "
+                    "payment gateways are also known as the merchant discount rate.")
+        assert not ga.asserts_target_capability(sentence, "Razorpay")
+        assert ga.check_target_claims(sentence, "Razorpay", None) == (sentence, [])
+        for definition in ("MDR is defined as the fee a merchant pays per transaction.",
+                           "The platform fee refers to the gateway's own charge on top of MDR."):
+            assert not ga.asserts_target_capability(definition, "Razorpay")
+
+    def test_real_brand_claim_is_still_flagged(self):
+        text, flags = ga.check_target_claims("Razorpay supports instant settlement for all merchants.", "Razorpay", None)
+        assert flags == ["unsupported_target_claim"]
+        assert text == "If Razorpay offers this, Razorpay supports instant settlement for all merchants."
