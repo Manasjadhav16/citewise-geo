@@ -511,31 +511,34 @@ class TestPreflightAndLimits(TestModelRetries):
         assert len(launched) == 1 and model.calls[0]["ok"] is True
 
     def test_other_preflight_failure_is_503(self, monkeypatch):
-        model, _ = self.make(monkeypatch, [RuntimeError("503 UNAVAILABLE")])
+        model, _ = self.make(monkeypatch, [RuntimeError("503 UNAVAILABLE")] * 4)  # every fallback model too
         with pytest.raises(ga.GapPreflightError) as info:
             run(ga.preflight_and_start("gap_1", {}, model=model, launch=lambda c: c.close()))
-        assert info.value.status_code == 503
+        assert info.value.status_code == 503 and len(model.calls) == 4
 
-    def test_call_timeout_is_not_retried(self, monkeypatch):
+    def test_call_timeout_falls_back_to_the_next_model(self, monkeypatch):
         import time as _time
 
         model, sleeps = self.make(monkeypatch, [])
         model.call_timeout = 0.05
+        replies = iter([None, '{"a": 1}'])  # first call hangs, the retry answers
 
-        def slow(model, contents, config):
-            _time.sleep(0.3)
+        def generate(model, contents, config):
+            reply = next(replies)
+            if reply is None:
+                _time.sleep(0.3)
+            return type("R", (), {"text": reply, "candidates": []})()
 
-        monkeypatch.setattr(model._provider.client.models, "generate_content", slow)
-        monkeypatch.setattr(ga.GeminiJSONModel, "_request", ga.GeminiJSONModel._request)
+        monkeypatch.setattr(model._provider.client.models, "generate_content", generate)
         real_wait = asyncio.wait_for
 
         async def short_wait(aw, timeout):
             return await real_wait(aw, timeout=0.05)
 
         monkeypatch.setattr(ga.asyncio, "wait_for", short_wait)
-        with pytest.raises(ga.ModelCallTimeout):
-            run(model.generate_json("extract", "p"))
-        assert len(model.calls) == 1 and sleeps == []
+        assert run(model.generate_json("extract", "p")) == {"a": 1}
+        assert [(c["model"], c["ok"]) for c in model.calls] == [("gemini-test", False), ("gemini-3.7-flash", True)]
+        assert "timed out" in model.calls[0]["error"] and sleeps == [4.0]
 
     def test_no_call_after_the_run_deadline(self, monkeypatch):
         model, _ = self.make(monkeypatch, ['{"a": 1}'])
@@ -554,3 +557,71 @@ class TestPreflightAndLimits(TestModelRetries):
         report = run(run_gap_analysis(payload, model=TestReport().model(), crawler=crawler, time_limit=0))
         assert report["deadline_reached"] is True
         assert all(q["errors"] == ["not analyzed: the 0-second run limit was reached"] for q in report["queries"])
+
+
+class TestModelFallback(TestModelRetries):
+    POOL = ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
+
+    def test_pool_is_the_existing_gemini_pool_with_the_primary_first(self):
+        from app.llm_providers.gemini.gemini_2_5_flash import FALLBACK_MODELS
+
+        assert ga.model_pool("gemini-3.7-flash", FALLBACK_MODELS) == FALLBACK_MODELS
+        assert ga.model_pool("gemini-3.8-flash", FALLBACK_MODELS)[:3] == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
+        assert ga.model_pool("gemini-3.7-flash") == FALLBACK_MODELS  # default: read from the provider module
+
+    def test_503_moves_to_the_next_model_and_stays_there(self, monkeypatch):
+        model, sleeps = self.make(monkeypatch, [RuntimeError("503 UNAVAILABLE high demand"), '{"a": 1}', '{"b": 2}'])
+        model.model_pool = self.POOL
+        model.model_name = model.primary_model = self.POOL[0]
+        assert run(model.generate_json("extract", "p")) == {"a": 1}
+        assert run(model.generate_json("judge", "p")) == {"b": 2}
+        assert [c["model"] for c in model.calls] == ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.8-flash"]
+        assert sleeps == [4.0] and ga.models_used(model.calls) == {"gemini-3.7-flash": 1, "gemini-3.8-flash": 2}
+
+    def test_per_minute_429_stays_on_the_same_model(self, monkeypatch):
+        model, _ = self.make(monkeypatch, [RuntimeError("429 RESOURCE_EXHAUSTED PerMinute"), '{"a": 1}'])
+        run(model.generate_json("extract", "p"))
+        assert [c["model"] for c in model.calls] == ["gemini-test", "gemini-test"]
+
+    def test_fallback_retries_are_capped(self, monkeypatch):
+        model, sleeps = self.make(monkeypatch, [RuntimeError("503 UNAVAILABLE")] * 5)
+        model.model_pool = self.POOL
+        model.model_name = self.POOL[0]
+        with pytest.raises(RuntimeError, match="503"):
+            run(model.generate_json("extract", "p"))
+        assert [c["model"] for c in model.calls] == self.POOL[:4] and sleeps == [4.0, 8.0, 16.0]
+
+    def test_preflight_falls_back_and_the_run_continues_on_that_model(self, monkeypatch):
+        model, sleeps = self.make(monkeypatch, [TimeoutError("Read timed out"), RuntimeError("503 UNAVAILABLE"), "ok", '{"a": 1}'])
+        model.model_pool = self.POOL
+        model.model_name = self.POOL[0]
+        launched = []
+
+        def launch(coro):
+            launched.append(coro)
+            coro.close()
+
+        run(ga.preflight_and_start("gap_1", {"sandbox_url": SANDBOX, "queries": [{}]}, model=model, launch=launch))
+        assert launched and [(c["stage"], c["model"], c["ok"]) for c in model.calls] == [
+            ("preflight", "gemini-3.7-flash", False), ("preflight", "gemini-3.8-flash", False),
+            ("preflight", "gemini-3.5-flash-lite", True),
+        ]
+        assert sleeps == [4.0, 8.0]
+        run(model.generate_json("extract", "p"))
+        assert model.calls[-1]["model"] == "gemini-3.5-flash-lite"
+
+    def test_preflight_daily_quota_still_stops_without_fallback(self, monkeypatch):
+        daily = RuntimeError("429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+        model, sleeps = self.make(monkeypatch, [daily, "ok"])
+        with pytest.raises(ga.GapPreflightError) as info:
+            run(ga.preflight_and_start("gap_1", {}, model=model, launch=lambda c: c.close()))
+        assert info.value.status_code == 429 and len(model.calls) == 1 and sleeps == []
+
+    def test_report_lists_the_pool_and_models_used(self):
+        report = run(run_gap_analysis(TestReport().payload(), model=TestReport().model(),
+                                      crawler=lambda url: _page(url)))
+        assert "models_used" in report["model_calls"] and "model_pool" in report["settings"]
+
+
+async def _page(url):
+    return {"full_content": PAGES.get(url, "")}

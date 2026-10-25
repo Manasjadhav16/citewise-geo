@@ -613,6 +613,12 @@ def _is_retryable(error: Exception) -> bool:
     return any(s in text for s in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "high demand", "overloaded"))
 
 
+def _is_unavailable(error: Exception) -> bool:
+    """A 503-style overload: worth trying another model of the pool."""
+    text = str(error)
+    return any(s in text for s in ("503", "UNAVAILABLE", "high demand", "overloaded"))
+
+
 def _is_daily_quota(error: Exception) -> bool:
     text = str(error)
     return ("429" in text or "RESOURCE_EXHAUSTED" in text) and ("PerDay" in text or "per day" in text.lower())
@@ -627,13 +633,15 @@ JUDGE_MAX_TOKENS = 16384
 
 class GeminiJSONModel:
     """
-    JSON text generation on one Gemini model (the configured EVIDENCE_EXTRACTION
-    model), with capped exponential backoff on 503/429. A reply that is not valid
-    JSON is retried once. A 429 for a daily quota is not retried, and no further
-    calls are made. Each call is capped at call_timeout seconds (not retried on
-    timeout), and no call starts after the run deadline. Every attempt is
-    counted; no fallback-model rotation, so the count is exact. Never calls
-    embeddings.
+    JSON text generation on the configured EVIDENCE_EXTRACTION model, falling
+    back through the existing Gemini model pool (gemini_2_5_flash.FALLBACK_MODELS):
+    a 503 or a timeout moves the call, and later calls, to the next model in the
+    pool, within the capped retries (max_retries, exponential backoff). A
+    per-minute 429 is retried on the same model. A reply that is not valid JSON is
+    retried once. A 429 for a daily quota is not retried, and no further calls are
+    made. Each call is capped at call_timeout seconds, and no call starts after
+    the run deadline. Every attempt is counted, with the model it used. Never
+    calls embeddings.
     """
 
     def __init__(self, model_name: Optional[str] = None, max_retries: int = 3, base_delay: float = 4.0,
@@ -643,13 +651,21 @@ class GeminiJSONModel:
         from .llm_providers.factory import get_llm_provider
 
         self.model_name = model_name or get_model_for_role("EVIDENCE_EXTRACTION")
+        self.primary_model = self.model_name
         self._provider = get_llm_provider(self.model_name)
+        self.model_pool = model_pool(self.model_name, getattr(self._provider, "fallback_models", None))
         self.max_retries, self.base_delay, self.max_attempts, self._sleep = max_retries, base_delay, max_attempts, sleep
         self.json_retries = json_retries
         self.call_timeout = call_timeout
         self.deadline: Optional[float] = None  # time.monotonic() after which no call starts
         self.quota_exhausted: Optional[str] = None
         self.calls: List[Dict[str, Any]] = []
+
+    def _fall_back(self) -> str:
+        """Move to the next model of the pool (wrapping around); returns the new model."""
+        index = self.model_pool.index(self.model_name) if self.model_name in self.model_pool else -1
+        self.model_name = self.model_pool[(index + 1) % len(self.model_pool)]
+        return self.model_name
 
     def set_time_limit(self, seconds: float) -> None:
         self.deadline = time.monotonic() + seconds
@@ -686,18 +702,25 @@ class GeminiJSONModel:
         """
         if self.quota_exhausted:
             raise ModelQuotaExhausted(self.quota_exhausted)
-        started = time.monotonic()
-        record: Dict[str, Any] = {"stage": "preflight", "attempt": 1, "model": self.model_name}
-        self.calls.append(record)
-        try:
-            await self._request('Reply with the JSON {"ok": true}.', 1024, False, min(self.call_timeout, 30.0))
-            record.update(ok=True, seconds=round(time.monotonic() - started, 2))
-        except Exception as exc:
-            record.update(ok=False, error=f"{type(exc).__name__}: {str(exc)[:600]}",
-                          seconds=round(time.monotonic() - started, 2))
-            if _is_daily_quota(exc):
-                self.quota_exhausted = f"daily quota exhausted on {self.model_name}"
-            raise
+        for attempt in range(1, self.max_retries + 2):
+            started = time.monotonic()
+            record: Dict[str, Any] = {"stage": "preflight", "attempt": attempt, "model": self.model_name}
+            self.calls.append(record)
+            try:
+                await self._request('Reply with the JSON {"ok": true}.', 1024, False, min(self.call_timeout, 30.0))
+                record.update(ok=True, seconds=round(time.monotonic() - started, 2))
+                return
+            except Exception as exc:
+                record.update(ok=False, error=f"{type(exc).__name__}: {str(exc)[:600]}",
+                              seconds=round(time.monotonic() - started, 2))
+                if _is_daily_quota(exc):
+                    self.quota_exhausted = f"daily quota exhausted on {self.model_name}"
+                    raise
+                if (_is_unavailable(exc) or _is_timeout(exc)) and attempt <= self.max_retries:
+                    self._fall_back()
+                    await self._sleep(self.base_delay * (2 ** (attempt - 1)))
+                    continue
+                raise
 
     async def generate_json(self, stage: str, prompt: str, max_tokens: int = 4096) -> Any:
         transient_retries = json_failures = 0
@@ -731,16 +754,31 @@ class GeminiJSONModel:
                 if _is_daily_quota(exc):
                     self.quota_exhausted = f"daily quota exhausted on {self.model_name}"
                     raise
-                if _is_timeout(exc):
-                    raise
                 if isinstance(exc, (json.JSONDecodeError, EmptyModelReply)) and json_failures < self.json_retries:
                     json_failures += 1
                     continue
-                if _is_retryable(exc) and transient_retries < self.max_retries:
+                if (_is_retryable(exc) or _is_timeout(exc)) and transient_retries < self.max_retries:
+                    if _is_unavailable(exc) or _is_timeout(exc):
+                        self._fall_back()  # a per-minute 429 stays on the same model
                     await self._sleep(self.base_delay * (2 ** transient_retries))
                     transient_retries += 1
                     continue
                 raise
+
+
+def model_pool(primary: str, fallback_models: Optional[Sequence[str]] = None) -> List[str]:
+    """The primary model first, then the existing Gemini pool in its order, without repeats."""
+    if fallback_models is None:
+        from .llm_providers.gemini.gemini_2_5_flash import FALLBACK_MODELS as fallback_models
+    return list(dict.fromkeys([primary, *fallback_models]))
+
+
+def models_used(calls: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
+    used: Dict[str, int] = {}
+    for c in calls:
+        if c.get("model"):
+            used[c["model"]] = used.get(c["model"], 0) + 1
+    return used
 
 
 def summarize_calls(calls: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -979,10 +1017,11 @@ async def run_gap_analysis(
             "chars_per_token": CHARS_PER_TOKEN,
             "call_timeout_seconds": getattr(model, "call_timeout", None),
             "run_time_limit_seconds": time_limit,
+            "model_pool": getattr(model, "model_pool", None),
         },
         "deadline_reached": deadline_reached,
-        "model_calls": {**summarize_calls(calls), "quota_exhausted": getattr(model, "quota_exhausted", None),
-                        "calls": list(calls)},
+        "model_calls": {**summarize_calls(calls), "models_used": models_used(calls),
+                        "quota_exhausted": getattr(model, "quota_exhausted", None), "calls": list(calls)},
         "seconds": round(time.monotonic() - started, 1),
         "queries": queries,
     }
