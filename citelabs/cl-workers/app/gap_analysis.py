@@ -624,6 +624,54 @@ def check_target_claims(suggestion: str, brand: str, supporting_quote: Optional[
     return " ".join(out), (["unsupported_target_claim"] if rewritten else [])
 
 
+# ---------- promotions ----------
+
+# Promotion or offer wording. "offer" counts only as a noun (a festive offer, under its offer,
+# the offer period); "if Razorpay offers this" and fee types ("platform fee", "UPI MDR") never match.
+_PROMOTION_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (
+    r"\bpromotional\b", r"\bpromotions?\b", r"\bpromos?\b", r"\bdiscount(?:s|ed)?\b", r"\bcash\s?backs?\b",
+    r"\bwaivers?\b", r"\bwaived\b",
+    r"\b(?:festive|special|introductory|launch|limited[- ]time|seasonal|welcome|exclusive|new[- ]merchant|"
+    r"promotional|holiday|diwali)\s+offers?\b",
+    r"\bunder\s+(?:a|an|its|the|this|their|your)\s+(?:[\w-]+\s+)?offer\b", r"\boffer\s+(?:period|ends|terms|validity|is\s+valid)\b",
+    r"\bzero(?:\s+[\w-]+)?\s+fees?\b", r"\b(?:fee[- ]free|free\s+of\s+charge)\b",
+    r"\bfree\s+for\s+(?:new|first|the\s+first|all)\b",
+)]
+
+
+def promotion_wording(sentence: str) -> List[str]:
+    """The promotion or offer phrases in a sentence, as written (a phrase inside a longer match is dropped)."""
+    spans = []
+    for pattern in _PROMOTION_PATTERNS:
+        spans += [(m.start(), m.end()) for m in pattern.finditer(sentence)]
+    kept = [sp for sp in spans if not any(o != sp and o[0] <= sp[0] and sp[1] <= o[1] for o in spans)]
+    return list(dict.fromkeys(sentence[a:b] for a, b in sorted(kept)))
+
+
+def check_promotions(suggestion: str, topic: str, target_text: str) -> Tuple[str, List[str]]:
+    """
+    A suggestion sentence that mentions a promotion or offer (promotional,
+    discount, cashback, zero fee, free for new merchants, festive offer, waiver,
+    ...) is replaced by a neutral topic-level sentence ("Add a section on
+    <topic> and state your real figures.") and flagged unsupported_promotion,
+    unless the target page text itself contains that offer wording. Sentences
+    that only name a fee type are left alone.
+    """
+    target_norm = " " + normalize_for_match(target_text) + " "
+    neutral = f"Add a section on {topic} and state your real figures."
+    out, flagged = [], []
+    for sentence in split_sentences(suggestion):
+        unsupported = [w for w in promotion_wording(sentence) if " " + normalize_for_match(w) + " " not in target_norm]
+        if unsupported:
+            flagged += unsupported
+            sentence = neutral
+        if sentence not in out:  # one neutral sentence even if several were replaced
+            out.append(sentence)
+    if not flagged:
+        return suggestion, []
+    return " ".join(out), ["unsupported_promotion:" + ",".join(dict.fromkeys(flagged))]
+
+
 # ---------- quote quality ----------
 
 MIN_QUOTE_WORDS = 8
@@ -679,9 +727,10 @@ def apply_judgements(
     missing. "covered" needs a quote found on a target page that passes
     quote_quality (main content, long enough, not menu or site-wide text); a
     weak or unverified quote downgrades it to "partly", flagged. Suggestions are
-    kept only for missing/partly topics and go through check_target_claims
-    (unsupported capability claims become conditional) and check_suggestion
-    (promotional wording, unsourced figures, competitor names).
+    kept only for missing/partly topics and go through check_promotions
+    (unsupported offers become a neutral topic-level sentence),
+    check_target_claims (unsupported capability claims become conditional) and
+    check_suggestion (promotional wording, unsourced figures, competitor names).
     target_texts: target URL -> text (or PageText with sections).
     """
     verdicts = {}
@@ -727,9 +776,10 @@ def apply_judgements(
                 f"Add a section on {claim.claim} and state your real figures."
             )
             supported_by = quote if quality is None else None
-            suggestion, claim_flags = check_target_claims(original, brand, supported_by)
+            suggestion, promotion_flags = check_promotions(original, claim.claim, all_target_text)
+            suggestion, claim_flags = check_target_claims(suggestion, brand, supported_by)
             suggestion, suggestion_flags = check_suggestion(suggestion, all_target_text, competitor_names)
-            flags.extend(claim_flags + suggestion_flags)
+            flags.extend(promotion_flags + claim_flags + suggestion_flags)
         rows.append({
             "claim_id": claim.claim_id,
             "claim": claim.claim,

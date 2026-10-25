@@ -1042,3 +1042,41 @@ class TestDefinitionsAreNotClaims:
         text, flags = ga.check_target_claims("Razorpay supports instant settlement for all merchants.", "Razorpay", None)
         assert flags == ["unsupported_target_claim"]
         assert text == "If Razorpay offers this, Razorpay supports instant settlement for all merchants."
+
+
+class TestPromotionCheck:
+    COPIED = ("Razorpay could add details that new merchants can receive zero platform fees for sales up to "
+              "[add your real figure] under its promotional offer.")
+
+    def test_copied_offer_is_replaced_by_a_neutral_sentence(self):
+        text, flags = ga.check_promotions(self.COPIED, "new merchant pricing", "Razorpay pricing: 2% per transaction.")
+        assert text == "Add a section on new merchant pricing and state your real figures."
+        assert flags == ["unsupported_promotion:zero platform fees,under its promotional offer"]
+
+    def test_offer_kept_when_the_target_page_uses_that_wording(self):
+        text, flags = ga.check_promotions("Explain the festive offer and when it ends.", "festive pricing",
+                                          "Our festive offer: lower fees until 31 October.")
+        assert (text, flags) == ("Explain the festive offer and when it ends.", [])
+
+    def test_only_the_promotion_sentence_is_replaced(self):
+        text, flags = ga.check_promotions("Add a section on setup fees. Mention any cashback for new merchants.",
+                                          "setup fee", "Razorpay setup fees.")
+        assert text == "Add a section on setup fees. Add a section on setup fee and state your real figures."
+        assert flags == ["unsupported_promotion:cashback"]
+
+    def test_fee_types_and_offer_as_a_verb_are_not_promotions(self):
+        for sentence in ("Add a section on platform fee and state your real figures.",
+                         "State your UPI MDR and the zero MDR rule for RuPay debit cards.",
+                         "If Razorpay offers this, state the settlement time.",
+                         "List the payment methods your gateway offers.",
+                         "State your international card fee as [add your real figure]."):
+            assert ga.check_promotions(sentence, "fees", "") == (sentence, []), sentence
+
+    def test_flagged_in_judged_suggestions(self):
+        claims = topics([("platform fee", ["S1.1", "S2.1"])], [item("S1.1"), item("S2.1")])
+        reply = {"judgements": [{"claim_id": "C1", "status": "missing", "target_quote": None, "suggestion": self.COPIED}]}
+        rows = apply_judgements(claims, reply, {"https://razorpay.com/p": "Razorpay pricing: 2% per transaction."}, {},
+                                (), "Razorpay")
+        assert rows[0]["suggestion"] == "Add a section on platform fee and state your real figures."
+        assert rows[0]["flags"][0].startswith("unsupported_promotion:")
+        assert rows[0]["suggestion_original"] == self.COPIED
